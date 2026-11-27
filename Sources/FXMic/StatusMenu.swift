@@ -168,6 +168,18 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             fallback.indentationLevel = 1
             menu.addItem(fallback)
         }
+        // Pick-up / hang-up shortcut: shown, re-recorded, or reset from here.
+        let shortcutMenu = NSMenu()
+        let recordItem = NSMenuItem(title: "Record new shortcut…", action: #selector(recordShortcut), keyEquivalent: "")
+        recordItem.target = self
+        shortcutMenu.addItem(recordItem)
+        let resetItem = NSMenuItem(title: "Reset to ⌘⇧M", action: #selector(resetShortcut), keyEquivalent: "")
+        resetItem.target = self
+        resetItem.isEnabled = Settings.shared.hotKeyLabel != "⌘⇧M"
+        shortcutMenu.addItem(resetItem)
+        let shortcutItem = NSMenuItem(title: "Pick-up shortcut: \(Settings.shared.hotKeyLabel)", action: nil, keyEquivalent: "")
+        shortcutItem.submenu = shortcutMenu
+        menu.addItem(shortcutItem)
         let badge = NSMenuItem(title: "Menu bar activity badge", action: #selector(toggleBadge), keyEquivalent: "")
         badge.target = self; badge.state = Settings.shared.statusBadge ? .on : .off
         menu.addItem(badge)
@@ -210,6 +222,30 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     @objc private func toggleEngine() {
         Settings.shared.transcriptionEngine = Settings.shared.transcriptionEngine == "claude" ? "apple" : "claude"
         Log.write("transcription engine: \(Settings.shared.transcriptionEngine)")
+    }
+    private let recorder = ShortcutRecorder()
+    @objc private func recordShortcut() {
+        let s = Settings.shared
+        let old = (s.hotKeyCode, s.hotKeyModifiers, s.hotKeyLabel)
+        HotKey.unregister()                       // so pressing the current combination records it instead of toggling
+        recorder.record(current: s.hotKeyLabel) { [weak self] result in
+            guard let self else { return }
+            guard let (code, mods, label) = result else { self.controller.registerHotKey(); return }
+            s.hotKeyCode = Int(code); s.hotKeyModifiers = Int(mods); s.hotKeyLabel = label
+            if !self.controller.registerHotKey() {
+                (s.hotKeyCode, s.hotKeyModifiers, s.hotKeyLabel) = old
+                self.controller.registerHotKey()
+                self.controller.hud.flash("\(label) is taken", detail: "Another app uses it. Kept \(old.2).", tint: .red,
+                                          icon: "keyboard", seconds: 3)
+            } else {
+                self.controller.hud.flash("Shortcut: \(label)", tint: .blue, icon: "keyboard", seconds: 1.6)
+            }
+        }
+    }
+    @objc private func resetShortcut() {
+        let s = Settings.shared
+        s.hotKeyCode = Int(HotKey.defaultKeyCode); s.hotKeyModifiers = Int(HotKey.defaultModifiers); s.hotKeyLabel = "⌘⇧M"
+        controller.registerHotKey()
     }
     @objc private func toggleUSB() {
         Settings.shared.usbTrigger.toggle()

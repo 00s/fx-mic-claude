@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import CoreAudio
 import Foundation
 
 /// Talks to the Claude desktop app: bring it forward, go back, open a new Code session.
@@ -9,6 +10,43 @@ enum ClaudeApp {
 
     static var running: NSRunningApplication? {
         NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first
+    }
+
+    /// True while a Claude process (its dictation runs in a helper process) has an audio input running. Unlike the
+    /// dictation control's label, this is right even when Claude's window is hidden, minimized or covered, where its
+    /// accessibility values go stale.
+    static func isUsingMic() -> Bool {
+        var addr = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyProcessObjectList,
+                                              mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        var size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size) == noErr else { return false }
+        var ids = [AudioObjectID](repeating: 0, count: Int(size) / MemoryLayout<AudioObjectID>.size)
+        guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size, &ids) == noErr else { return false }
+        for id in ids {
+            var running: UInt32 = 0, pid: pid_t = 0
+            var s = UInt32(MemoryLayout<UInt32>.size)
+            var a = AudioObjectPropertyAddress(mSelector: kAudioProcessPropertyIsRunningInput,
+                                               mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+            guard AudioObjectGetPropertyData(id, &a, 0, nil, &s, &running) == noErr, running != 0 else { continue }
+            a.mSelector = kAudioProcessPropertyPID
+            s = UInt32(MemoryLayout<pid_t>.size)
+            guard AudioObjectGetPropertyData(id, &a, 0, nil, &s, &pid) == noErr else { continue }
+            var path = [CChar](repeating: 0, count: 4096)
+            if proc_pidpath(pid, &path, UInt32(path.count)) > 0, String(cString: path).contains("/Claude.app/") { return true }
+        }
+        return false
+    }
+
+    /// Claude hidden with ⌘H exposes no usable accessibility tree: no composer text, no Send, no label changes. Show
+    /// its windows again without activating it (the current app stays in front) and give them a moment to come back.
+    /// True when it had to.
+    @discardableResult
+    static func showIfHidden() -> Bool {
+        guard let app = running, app.isHidden else { return false }
+        app.unhide()
+        for _ in 0..<10 where app.isHidden { Thread.sleep(forTimeInterval: 0.05) }
+        Thread.sleep(forTimeInterval: 0.3)
+        return true
     }
 
     /// Brings Claude to the front; if it is already frontmost, returns to the app that was active before.
@@ -55,9 +93,12 @@ enum ClaudeApp {
         }
     }
 
+    /// Return, delivered to the Claude process only (never system-wide), so it can't land in another app if focus
+    /// changes at the last moment.
     static func pressReturn() {
+        guard let pid = running?.processIdentifier else { return }
         let source = CGEventSource(stateID: .hidSystemState)
-        CGEvent(keyboardEventSource: source, virtualKey: 36, keyDown: true)?.post(tap: .cghidEventTap)
-        CGEvent(keyboardEventSource: source, virtualKey: 36, keyDown: false)?.post(tap: .cghidEventTap)
+        CGEvent(keyboardEventSource: source, virtualKey: 36, keyDown: true)?.postToPid(pid)
+        CGEvent(keyboardEventSource: source, virtualKey: 36, keyDown: false)?.postToPid(pid)
     }
 }

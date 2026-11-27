@@ -29,6 +29,10 @@ final class Settings {
             "dictationButtonLabels": ["hold to record", "dictat"],
             "shakeToCancel": true,
             "usbTrigger": true,
+            "hotKeyCode": 46,                  // kVK_ANSI_M
+            "hotKeyModifiers": 768,            // cmdKey | shiftKey
+            "hotKeyLabel": "⌘⇧M",
+            "logTranscripts": false,
             "stuckSqueezeSeconds": 30.0,
             "appleFallback": true,
             "statusBadge": true,
@@ -87,6 +91,13 @@ final class Settings {
     /// squeezes. Without reports (mic on batteries, old script) FXMic listens for the marker tones.
     /// A squeeze with no speech for this long and no release heard ends as a draft (a missed release tone). 0 = never.
     var stuckSqueezeSeconds: Double { d.double(forKey: "stuckSqueezeSeconds") }
+    /// Write what you say into ~/.fxmic/fxmic.log and the system log. Off: only how many words, so the log can be
+    /// shared for debugging and keeps no conversation content. Turn on to compare transcripts.
+    var logTranscripts: Bool { d.bool(forKey: "logTranscripts") }
+    /// The pick-up / hang-up shortcut, recorded from the menu: Carbon key code and modifier bits, and how it reads.
+    var hotKeyCode: Int { get { d.integer(forKey: "hotKeyCode") } set { d.set(newValue, forKey: "hotKeyCode") } }
+    var hotKeyModifiers: Int { get { d.integer(forKey: "hotKeyModifiers") } set { d.set(newValue, forKey: "hotKeyModifiers") } }
+    var hotKeyLabel: String { get { d.string(forKey: "hotKeyLabel") ?? "⌘⇧M" } set { d.set(newValue, forKey: "hotKeyLabel") } }
     var usbTrigger: Bool { get { d.bool(forKey: "usbTrigger") } set { d.set(newValue, forKey: "usbTrigger") } }
     /// With Claude's dictation: also run Apple's on-device recognizer on each squeeze, used when Claude's text is
     /// missing. Off means FXMic does not transcribe at all (and, with squeezes over USB, never opens the input).

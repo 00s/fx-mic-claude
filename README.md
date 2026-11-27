@@ -21,7 +21,7 @@ Nothing from Teenage Engineering is redistributed here.
 | two quick taps, handle released | the app hangs up (stops listening, orange dot off) |
 | left-click the menu bar handset | pick up or hang up |
 | right-click the menu bar handset | menu: stop/start listening, input device, target session, shake to cancel, activity badge, launch at login, quit |
-| `⌃⌥Space` | pick up or hang up |
+| `⌘⇧M` (change it in the menu: "Pick-up shortcut") | pick up or hang up |
 
 English and Spanish are both recognized, chosen per message. The app hangs up by itself after 20 minutes without a
 squeeze, which is when the mic turns itself off too. A small toast slides down from the top of the screen while you squeeze, showing "Listening", a level
@@ -135,7 +135,10 @@ script also prints each event on its serial console ("fxmic press", "fxmic relea
 "fxmic cancel", "fxmic tap", and "fxmic hi" about every 2 s). While those lines arrive, FXMic takes squeezes from
 there and keeps the input closed between them. The menu's "Mic open only while squeezing (USB cable)" turns this on
 or off, and the line under it says what is happening now: "closed between squeezes, over USB", "mic not on USB,
-listening for tones", or "listening for tones".
+listening for tones", or "listening for tones". With the cable in, the mic can also pick up after FXMic hung up
+(after two taps on play, or 20 minutes without a squeeze): a squeeze picks up and starts the message, a tap on play
+only picks up. Without the cable, a hung-up FXMic hears nothing, so pick up from the Mac (click the handset or the
+shortcut).
 It opens the input at the squeeze (in 70 to 180 ms here) and closes it at the release, for the level meter and,
 when wanted, Apple's recognizer. With Claude's dictation the mic is open for the squeeze anyway, and with "Apple's
 recognizer as fallback" off FXMic only measures the level and transcribes nothing. On batteries, with a charge-only cable or with an older script, no lines arrive and FXMic goes back
@@ -157,14 +160,18 @@ on-device recognizer. Turn on "Transcribe with Claude's dictation" in the menu (
 `defaults write com.miguel.fxmic transcriptionEngine claude`) and a squeeze drives the Claude app's own dictation
 instead: FXMic presses the mic control next to the composer ("Press and hold to record") through Accessibility,
 presses it again on release, and leaves the text where Claude wrote it, in the session it was spoken into: white
-keeps it as a draft, a plain squeeze presses Send (or queues when the session is busy), orange queues it in
+keeps it as a draft, a plain squeeze presses Send (while Claude is working that sends it as a mid-turn message; if
+Claude shows Stop instead of Send, it queues), orange queues it in
 Claude with Cmd+Return. Like dictating by hand, the words are added after any draft already in the composer, and
 Send sends both. That is the same speech-to-text as clicking the mic in Claude, so the words come out
-the same. Apple's recognizer keeps running alongside as the fallback when dictation cannot start, and the log shows
-both transcripts of every message ("compare: claude: … | apple …"). Turn the fallback off with the menu's "Apple's
+the same. Apple's recognizer keeps running alongside as the fallback when dictation cannot start, and the log has
+one "compare: claude: … | apple …" line per message: word counts only, or both transcripts with
+`defaults write com.miguel.fxmic logTranscripts -bool true`. By default FXMic writes nothing you say to its log
+(`~/.fxmic`, readable by you only) or to the system log. Turn the fallback off with the menu's "Apple's
 recognizer as fallback" (`appleFallback`); a squeeze whose dictation fails to start is then lost. The Claude window has to show a composer
-with the mic control. Claude starts listening 0.4 to 1 s after the squeeze, so wait for "Listening" in the bar
-before talking. If Claude renames the control, list what is next to the composer with `touch ~/.fxmic/axdump`
+with the mic control. Claude starts listening 0.4 to 1 s after the squeeze: until then the bar is grey with a spinner
+and "Starting…", then it turns yellow with "Listening" and the name of the conversation the words go to. Wait for
+the yellow before talking. If Claude renames the control, list what is next to the composer with `touch ~/.fxmic/axdump`
 (written to the log) and set `defaults write com.miguel.fxmic dictationButtonLabels -array "<part of the label>"`.
 
 ## Band-limited or quiet adapters

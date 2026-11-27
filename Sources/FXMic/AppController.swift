@@ -61,6 +61,10 @@ final class AppController {
     private(set) var usbLiveMain = false
     private var squeezeStartedAt = Date.distantPast       // pipeline
     private var pendingTap: DispatchWorkItem?             // main
+    /// A squeeze reported over USB while hung up: FXMic picks up first, then starts it (pipeline).
+    private var pendingWakeSqueeze = false
+    /// Taps right after a tap picked FXMic up are ignored, so a double tap doesn't pick up and act at once (main).
+    private var ignoreTapsUntil = Date.distantPast
 
     // Pipeline state, pipeline queue only.
     private var capture: InputCapture?
@@ -529,10 +533,23 @@ final class AppController {
     }
 
     private var hudShownForSerial = -1
+    /// Where Apple-mode text will go: the session picked in the menu, else the last used one, else the inbox target.
+    private var expectedTarget: String? {
+        if settings.composerDelivery, ComposerDelivery.isTrusted,
+           let title = settings.targetSessionTitle ?? SessionStore.lastUsed()?.title { return title }
+        return dispatcher.currentTarget?.title ?? "No session armed: will copy to the clipboard"
+    }
+
     private func showListeningIfNeeded() {
         guard state == .listening, hudShownForSerial != utteranceSerial else { return }
         hudShownForSerial = utteranceSerial
-        hud.listening(target: dispatcher.currentTarget?.title ?? "No session armed, will copy to clipboard")
+        if settings.transcriptionEngine == "claude" {
+            // The conversation is known once Claude's dictation starts in it; until then the bar is grey.
+            hud.listening(target: nil)
+            hud.starting()
+        } else {
+            hud.listening(target: expectedTarget)
+        }
     }
 
     private func endUtterance(frames: Int) {
@@ -635,7 +652,35 @@ final class AppController {
     }
 
     private func usbEvent(_ event: MicSerial.Event) {
-        guard usbLive, state != .idle, !replayActive else { return }
+        guard usbLive, !replayActive else { return }
+        // Hung up: the mic can still pick up over USB (the tones can't be heard then). A squeeze picks up and starts
+        // the message; a tap on the play button only picks up.
+        if state == .idle {
+            switch event {
+            case .press:
+                pendingWakeSqueeze = true
+                DispatchQueue.main.async {
+                    Log.write("usb: squeeze while hung up, picking up")
+                    self.arm()
+                    self.pipeline.async {
+                        guard self.pendingWakeSqueeze else { return }
+                        self.pendingWakeSqueeze = false
+                        if self.state != .idle, !self.handleMode { self.squeezeStarted() }
+                    }
+                }
+            case .release:
+                pendingWakeSqueeze = false          // released before FXMic was ready: too short to be a message
+            case .tap:
+                DispatchQueue.main.async {
+                    Log.write("usb: tap while hung up, picking up")
+                    self.ignoreTapsUntil = Date().addingTimeInterval(0.6)
+                    self.arm()
+                }
+            default:
+                break
+            }
+            return
+        }
         switch event {
         case .hi: break
         case .press: if !handleMode { squeezeStarted() }
@@ -648,6 +693,16 @@ final class AppController {
     }
 
     // MARK: USB trigger (main)
+
+    /// Registers the pick-up / hang-up shortcut from the settings. False when another app owns that combination.
+    @discardableResult
+    func registerHotKey() -> Bool {
+        let ok = HotKey.register(keyCode: UInt32(settings.hotKeyCode), modifiers: UInt32(settings.hotKeyModifiers)) { [weak self] in
+            self?.toggleArmed(source: "hotkey")
+        }
+        Log.write("shortcut \(settings.hotKeyLabel): " + (ok ? "registered" : "not available, another app may use it"))
+        return ok
+    }
 
     /// The menu switch: watch the mic's USB console, or ignore it and always use the tones.
     func setUSBTrigger(_ on: Bool) {
@@ -702,6 +757,7 @@ final class AppController {
 
     /// The mic reports each press of the play button; two within 450 ms are a double tap, like the tone detector.
     private func usbTap() {
+        if Date() < ignoreTapsUntil { return }
         if let pending = pendingTap {
             pending.cancel()
             pendingTap = nil
@@ -730,11 +786,11 @@ final class AppController {
             case .success(let session):
                 self.claudeLive = true
                 if !session.isEmpty { self.dictatedSession[serial] = session }
-                self.hud.listeningReady()
+                self.hud.listeningReady(session: session)
             case .failure(let error):
                 Log.write("dictation: could not start (\(error)), Apple's recognizer takes this message")
                 self.claudeLive = false
-                self.hud.listeningReady()
+                self.hud.listeningReady(session: self.expectedTarget)
             }
         }
     }
@@ -749,10 +805,10 @@ final class AppController {
     private func pick(apple: UtteranceResult, claude: Result<String, ClaudeDictation.Failure>?, serial: Int) -> UtteranceResult {
         DispatchQueue.main.async { self.claudeLive = false }
         guard let claude else { return apple }
-        let appleLine = String(format: "apple [%@ %.2f]: %@", apple.locale, apple.confidence, apple.text.isEmpty ? "(empty)" : apple.text)
+        let appleLine = String(format: "apple [%@ %.2f]: %@", apple.locale, apple.confidence, Log.text(apple.text))
         switch claude {
         case .success(let text) where !text.isEmpty:
-            Log.write("compare: claude: \(text) | \(appleLine)")
+            Log.write("compare: claude: \(Log.text(text)) | \(appleLine)")
             return UtteranceResult(text: text, locale: "claude", confidence: 1, alternatives: [])
         case .success:
             Log.write("compare: claude: (empty), using Apple's | \(appleLine)")
@@ -770,7 +826,7 @@ final class AppController {
         let dictatedIn = dictatedSession.removeValue(forKey: serial)
         let inComposer = result.locale == "claude"      // Claude's dictation left this text in the composer
         if canceledSerials.remove(serial) != nil {
-            Log.write("canceled: \(result.text)")
+            Log.write("canceled: \(Log.text(result.text))")
             if inComposer { dictation.complete(serial: serial, action: .discard) { _ in } }
             if activeSqueeze == nil { hud.hide(after: 0.3) }   // the shake already showed "Canceled"
             return
@@ -778,7 +834,7 @@ final class AppController {
         let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
         let letters = text.unicodeScalars.filter { CharacterSet.letters.contains($0) }.count
         guard letters >= 2, speechSeconds >= 0.4, result.confidence >= 0.35 else {
-            Log.write(String(format: "dropped: %@ (%.1fs speech, conf %.2f)", text.isEmpty ? "empty" : text, speechSeconds, result.confidence))
+            Log.write(String(format: "dropped: %@ (%.1fs speech, conf %.2f)", Log.text(text), speechSeconds, result.confidence))
             if inComposer { dictation.complete(serial: serial, action: .discard) { _ in } }
             if activeSqueeze == nil { hud.hide(after: 0.2) }
             return
@@ -831,7 +887,7 @@ final class AppController {
         } else {
             outcome = inboxOutcome(text: text, result: result, speechSeconds: speechSeconds)
         }
-        Log.write(String(format: "%@: %@  [%@ %.2f, %.1fs]", outcome, text, result.locale, result.confidence, speechSeconds))
+        Log.write(String(format: "%@: %@  [%@ %.2f, %.1fs]", outcome, Log.text(text), result.locale, result.confidence, speechSeconds))
         recent.insert((Date(), text, outcome), at: 0)
         if recent.count > 12 { recent.removeLast() }
         lastActivity = Date()
@@ -871,7 +927,7 @@ final class AppController {
                 }
             }
             if self.settings.targetSessionTitle != nil { self.settings.targetSessionTitle = nil }
-            Log.write(String(format: "%@: %@  [claude, %.1fs]", outcome, text, speechSeconds))
+            Log.write(String(format: "%@: %@  [claude, %.1fs]", outcome, Log.text(text), speechSeconds))
             self.recent.insert((Date(), text, outcome), at: 0)
             if self.recent.count > 12 { self.recent.removeLast() }
             self.lastActivity = Date()
@@ -919,10 +975,10 @@ final class AppController {
         lastQueuedSendAt = Date()
         do {
             try ComposerDelivery.send(item.text, toSessionTitled: item.target, pressSend: !expired)
-            Log.write("queue: \(expired ? "waited 30 min, left as draft in" : "sent to") \(item.target): \(item.text)")
+            Log.write("queue: \(expired ? "waited 30 min, left as draft in" : "sent to") \(item.target): \(Log.text(item.text))")
             if activeSqueeze == nil { hud.sent(item.text, outcome: "", title: expired ? "Queued item left as draft" : "Sent queued message") }
         } catch {
-            Log.write("queue: send failed (\(error)), copied to the clipboard: \(item.text)")
+            Log.write("queue: send failed (\(error)), copied to the clipboard: \(Log.text(item.text))")
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(item.text, forType: .string)
         }
@@ -993,18 +1049,20 @@ final class AppController {
         Log.write("debug: Listening bar demo")
         let words = "This is the Listening bar growing as words arrive, line after line, so its motion can be checked without sending anything."
             .split(separator: " ")
-        hud.listening(target: "demo")
+        hud.listening(target: nil)
+        hud.starting()                                       // grey until "Claude" listens
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { self.hud.listeningReady(session: "Demo conversation") }
         for i in 0..<60 {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3 + Double(i) * 0.05) {
                 self.hud.model.level = -40 + Float(sin(Double(i) / 3) * 18)
             }
         }
         for (i, _) in words.enumerated() {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0 + Double(i) * 0.18) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.4 + Double(i) * 0.18) {
                 self.hud.partial(words[0...i].joined(separator: " "))
             }
         }
-        let end = 1.0 + Double(words.count) * 0.18 + 0.4
+        let end = 1.4 + Double(words.count) * 0.18 + 0.4
         DispatchQueue.main.asyncAfter(deadline: .now() + end) { self.hud.sending() }
         DispatchQueue.main.asyncAfter(deadline: .now() + end + 0.6) {
             self.hud.sent(words.joined(separator: " "), outcome: "demo", title: "Sent")

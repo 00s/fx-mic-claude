@@ -9,7 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller = AppController()
         statusMenu = StatusMenu(controller: controller)
         controller.onActivity = { [weak self] a in self?.statusMenu.setActivity(a) }
-        HotKey.register { [weak self] in self?.controller.toggleArmed(source: "hotkey") }
+        controller.registerHotKey()
         if Settings.shared.autoArm {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { self.controller.arm() }
         }

@@ -65,6 +65,7 @@ enum ComposerDelivery {
     static func send(_ text: String, toSessionTitled target: String? = nil, pressSend: Bool = true) throws {
         guard isTrusted else { throw Failure.notTrusted }
         guard let app = ClaudeApp.running else { throw Failure.claudeNotRunning }
+        if ClaudeApp.showIfHidden() { Log.write("Claude was hidden, showed it behind the current app") }
         let axApp = AXUIElementCreateApplication(app.processIdentifier)
         AXUIElementSetAttributeValue(axApp, "AXManualAccessibility" as CFString, kCFBooleanTrue)
         if let target {
@@ -92,12 +93,12 @@ enum ComposerDelivery {
             }
             throw Failure.valueNotSet
         }
-        if let draft { Log.write("composer holds a draft, will restore it: \(draft.prefix(60))") }
+        if let draft { Log.write("composer holds a draft, will restore it: \(Log.text(draft))") }
         defer {
             if let draft {
                 Thread.sleep(forTimeInterval: 0.2)
                 let r = AXUIElementSetAttributeValue(composer, kAXValueAttribute as CFString, draft as CFString)
-                Log.write(r == .success ? "draft restored" : "draft could not be restored: \(draft)")
+                Log.write(r == .success ? "draft restored" : "draft could not be restored: \(Log.text(draft))")
             }
         }
         var value = ""
@@ -106,7 +107,7 @@ enum ComposerDelivery {
             Thread.sleep(forTimeInterval: 0.15 + 0.15 * Double(attempt))
             value = string(composer, kAXValueAttribute)
             if value.hasPrefix(text.prefix(40)) { break }
-            Log.write("composer set attempt \(attempt + 1) -> \(r.rawValue), readback: \(value.prefix(60))")
+            Log.write("composer set attempt \(attempt + 1) -> \(r.rawValue), readback: \(Log.text(value))")
         }
         guard value.hasPrefix(text.prefix(40)) else { throw Failure.valueNotSet }
 
