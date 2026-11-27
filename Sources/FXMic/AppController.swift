@@ -762,10 +762,10 @@ final class AppController {
     private func pick(apple: UtteranceResult, claude: Result<String, ClaudeDictation.Failure>?, serial: Int) -> UtteranceResult {
         DispatchQueue.main.async { self.claudeLive = false }
         guard let claude else { return apple }
-        let appleLine = String(format: "apple [%@ %.2f]: %@", apple.locale, apple.confidence, apple.text.isEmpty ? "(empty)" : apple.text)
+        let appleLine = String(format: "apple [%@ %.2f]: %@", apple.locale, apple.confidence, Log.text(apple.text))
         switch claude {
         case .success(let text) where !text.isEmpty:
-            Log.write("compare: claude: \(text) | \(appleLine)")
+            Log.write("compare: claude: \(Log.text(text)) | \(appleLine)")
             return UtteranceResult(text: text, locale: "claude", confidence: 1, alternatives: [])
         case .success:
             Log.write("compare: claude: (empty), using Apple's | \(appleLine)")
@@ -783,7 +783,7 @@ final class AppController {
         let dictatedIn = dictatedSession.removeValue(forKey: serial)
         let inComposer = result.locale == "claude"      // Claude's dictation left this text in the composer
         if canceledSerials.remove(serial) != nil {
-            Log.write("canceled: \(result.text)")
+            Log.write("canceled: \(Log.text(result.text))")
             if inComposer { dictation.complete(serial: serial, action: .discard) { _ in } }
             if activeSqueeze == nil { hud.hide(after: 0.3) }   // the shake already showed "Canceled"
             return
@@ -791,7 +791,7 @@ final class AppController {
         let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
         let letters = text.unicodeScalars.filter { CharacterSet.letters.contains($0) }.count
         guard letters >= 2, speechSeconds >= 0.4, result.confidence >= 0.35 else {
-            Log.write(String(format: "dropped: %@ (%.1fs speech, conf %.2f)", text.isEmpty ? "empty" : text, speechSeconds, result.confidence))
+            Log.write(String(format: "dropped: %@ (%.1fs speech, conf %.2f)", Log.text(text), speechSeconds, result.confidence))
             if inComposer { dictation.complete(serial: serial, action: .discard) { _ in } }
             if activeSqueeze == nil { hud.hide(after: 0.2) }
             return
@@ -844,7 +844,7 @@ final class AppController {
         } else {
             outcome = inboxOutcome(text: text, result: result, speechSeconds: speechSeconds)
         }
-        Log.write(String(format: "%@: %@  [%@ %.2f, %.1fs]", outcome, text, result.locale, result.confidence, speechSeconds))
+        Log.write(String(format: "%@: %@  [%@ %.2f, %.1fs]", outcome, Log.text(text), result.locale, result.confidence, speechSeconds))
         recent.insert((Date(), text, outcome), at: 0)
         if recent.count > 12 { recent.removeLast() }
         lastActivity = Date()
@@ -884,7 +884,7 @@ final class AppController {
                 }
             }
             if self.settings.targetSessionTitle != nil { self.settings.targetSessionTitle = nil }
-            Log.write(String(format: "%@: %@  [claude, %.1fs]", outcome, text, speechSeconds))
+            Log.write(String(format: "%@: %@  [claude, %.1fs]", outcome, Log.text(text), speechSeconds))
             self.recent.insert((Date(), text, outcome), at: 0)
             if self.recent.count > 12 { self.recent.removeLast() }
             self.lastActivity = Date()
@@ -932,10 +932,10 @@ final class AppController {
         lastQueuedSendAt = Date()
         do {
             try ComposerDelivery.send(item.text, toSessionTitled: item.target, pressSend: !expired)
-            Log.write("queue: \(expired ? "waited 30 min, left as draft in" : "sent to") \(item.target): \(item.text)")
+            Log.write("queue: \(expired ? "waited 30 min, left as draft in" : "sent to") \(item.target): \(Log.text(item.text))")
             if activeSqueeze == nil { hud.sent(item.text, outcome: "", title: expired ? "Queued item left as draft" : "Sent queued message") }
         } catch {
-            Log.write("queue: send failed (\(error)), copied to the clipboard: \(item.text)")
+            Log.write("queue: send failed (\(error)), copied to the clipboard: \(Log.text(item.text))")
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(item.text, forType: .string)
         }

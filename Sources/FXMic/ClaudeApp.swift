@@ -55,9 +55,12 @@ enum ClaudeApp {
         }
     }
 
+    /// Return, delivered to the Claude process only (never system-wide), so it can't land in another app if focus
+    /// changes at the last moment.
     static func pressReturn() {
+        guard let pid = running?.processIdentifier else { return }
         let source = CGEventSource(stateID: .hidSystemState)
-        CGEvent(keyboardEventSource: source, virtualKey: 36, keyDown: true)?.post(tap: .cghidEventTap)
-        CGEvent(keyboardEventSource: source, virtualKey: 36, keyDown: false)?.post(tap: .cghidEventTap)
+        CGEvent(keyboardEventSource: source, virtualKey: 36, keyDown: true)?.postToPid(pid)
+        CGEvent(keyboardEventSource: source, virtualKey: 36, keyDown: false)?.postToPid(pid)
     }
 }
