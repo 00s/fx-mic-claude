@@ -160,8 +160,10 @@ presses it again on release, and leaves the text where Claude wrote it, in the s
 keeps it as a draft, a plain squeeze presses Send (or queues when the session is busy), orange queues it in
 Claude with Cmd+Return. Like dictating by hand, the words are added after any draft already in the composer, and
 Send sends both. That is the same speech-to-text as clicking the mic in Claude, so the words come out
-the same. Apple's recognizer keeps running alongside as the fallback when dictation cannot start, and the log shows
-both transcripts of every message ("compare: claude: … | apple …"). Turn the fallback off with the menu's "Apple's
+the same. Apple's recognizer keeps running alongside as the fallback when dictation cannot start, and the log has
+one "compare: claude: … | apple …" line per message: word counts only, or both transcripts with
+`defaults write com.miguel.fxmic logTranscripts -bool true`. By default FXMic writes nothing you say to its log
+(`~/.fxmic`, readable by you only) or to the system log. Turn the fallback off with the menu's "Apple's
 recognizer as fallback" (`appleFallback`); a squeeze whose dictation fails to start is then lost. The Claude window has to show a composer
 with the mic control. Claude starts listening 0.4 to 1 s after the squeeze: until then the bar is grey with a spinner
 and "Starting…", then it turns yellow with "Listening" and the name of the conversation the words go to. Wait for
