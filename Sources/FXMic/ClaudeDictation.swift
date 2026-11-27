@@ -37,12 +37,20 @@ final class ClaudeDictation {
         var labelChanged = false
         /// Claude was seen opening the microphone (its label did not update: window out of view).
         var micSeen = false
+        /// The draft that was in the composer before the squeeze can no longer be found in it (edited, or reformatted
+        /// by Claude), so the dictated words can't be told apart from it: never send that, leave it as a draft.
+        var draftChanged = false
         /// What the composer held when the squeeze began: a draft, or "".
         let before: String
     }
     private var run: Run?
     /// The last finished squeeze, whose text is still in the composer until `complete` decides what to do with it.
     private var finished: Run?
+    /// Squeezes whose finish (release) arrived before their start had run, because the start was waiting for the
+    /// previous squeeze to complete. Their start is skipped, or it would turn dictation on after the squeeze ended.
+    private var endedBeforeStart = Set<Int>()
+    /// The latest squeeze a start was requested for, so a hang-up can cancel a start still waiting to run.
+    private var latestRequested = -1
     private var poll: DispatchSourceTimer?
     private var lastPartial = ""
 
@@ -55,6 +63,12 @@ final class ClaudeDictation {
     /// title of the session it is listening in (the one on screen when the target could not be shown).
     func start(serial: Int, target: String?, attempt: Int = 0, onStarted: @escaping (Result<String, Failure>) -> Void) {
         queue.async { [self] in
+            if attempt == 0 { latestRequested = serial }
+            if endedBeforeStart.remove(serial) != nil {
+                Log.write("dictation: squeeze released before dictation could start, not started")
+                DispatchQueue.main.async { onStarted(.failure(.notRunning)) }
+                return
+            }
             // The last squeeze's text is still in the composer waiting to be sent, queued, kept or removed: let that
             // finish first (up to 3 s), so the two messages never mix.
             if finished != nil, attempt < 30 {
@@ -98,19 +112,36 @@ final class ClaudeDictation {
         // Claude may already be dictating (left on by hand, or by an FXMic that quit mid-squeeze). Pressing would
         // then stop it while FXMic believes it started, and every later squeeze would flip it the wrong way. Stop
         // that dictation first, wait for the idle label, then start a fresh one.
-        if Self.isListening(label(button)) || ClaudeApp.isUsingMic() {
+        // The label says so when Claude's window is in view. Out of view it goes stale and only the mic tells; a
+        // dictation that just ended can hold the mic for a moment, so the mic has to stay in use for 0.3 s to count.
+        var alreadyOn = Self.isListening(label(button))
+        if !alreadyOn, ClaudeApp.isUsingMic() {
+            Thread.sleep(forTimeInterval: 0.3)
+            alreadyOn = ClaudeApp.isUsingMic()
+        }
+        if alreadyOn {
             Log.write("dictation: Claude was already dictating, stopping that first")
-            AXUIElementPerformAction(button, kAXPressAction as CFString)
             let center = AX.frame(button)
-            for _ in 0..<20 {
-                Thread.sleep(forTimeInterval: 0.1)
-                if let b = self.button(at: CGPoint(x: center.midX, y: center.midY), in: window), !Self.isListening(label(b)),
-                   !ClaudeApp.isUsingMic() {
-                    button = b
-                    break
-                }
+            let point = CGPoint(x: center.midX, y: center.midY)
+            func stopped() -> Bool {
+                guard let b = self.button(at: point, in: window) else { return false }
+                if !Self.isListening(label(b)), !ClaudeApp.isUsingMic() { button = b; return true }
+                return false
             }
-            guard !Self.isListening(label(button)), !ClaudeApp.isUsingMic() else { return .failure(.noButton) }
+            func pressAndWait() -> Bool {
+                if let b = self.button(at: point, in: window) { AXUIElementPerformAction(b, kAXPressAction as CFString) }
+                for _ in 0..<20 {
+                    Thread.sleep(forTimeInterval: 0.1)
+                    if stopped() { return true }
+                }
+                return false
+            }
+            // If the press started a dictation instead (it wasn't running after all), the label now reads Stop:
+            // press once more so FXMic never leaves one running.
+            guard pressAndWait() || pressAndWait() else {
+                Log.write("dictation: could not get Claude's dictation to a stopped state")
+                return .failure(.noButton)
+            }
             Thread.sleep(forTimeInterval: 0.3)       // let the stopped dictation's text settle into the composer
         }
         let idleLabel = label(button)
@@ -144,6 +175,7 @@ final class ClaudeDictation {
         queue.async { [self] in
             stopPolling()
             guard let current = run, current.serial == serial else {
+                endedBeforeStart.insert(serial)
                 DispatchQueue.main.async { completion(.failure(.notRunning)) }
                 return
             }
@@ -159,7 +191,7 @@ final class ClaudeDictation {
     func abort() {
         queue.async { [self] in
             stopPolling()
-            guard let current = run else { return }
+            guard let current = run else { endedBeforeStart.insert(latestRequested); return }   // a start may be waiting
             run = nil
             var r = current
             let text = end(&r)
@@ -183,8 +215,10 @@ final class ClaudeDictation {
             let isDictation = lower.contains("dictat") || dictationLabels.contains { lower.contains($0) }
             if !isDictation {
                 Log.write("dictation: the control at the dictation button's place is \"\(l)\", not pressed")
-            } else if !Self.isListening(l), r.labelChanged || r.micSeen, l == r.idleLabel, !ClaudeApp.isUsingMic() {
-                Log.write("dictation: Claude had already stopped listening, not pressed")
+            } else if !Self.isListening(l), !ClaudeApp.isUsingMic() {
+                // Nothing says Claude is listening (label not Stop, mic not in use): it already stopped, or never
+                // started. A press now would start a dictation nobody stops.
+                Log.write("dictation: Claude is not listening, not pressed")
             } else if AXUIElementPerformAction(button, kAXPressAction as CFString) != .success {
                 Log.write("dictation: stop press failed on \"\(l)\"")
             } else {
@@ -209,6 +243,7 @@ final class ClaudeDictation {
             if idle, still >= settle, !last.isEmpty || Date().timeIntervalSince(pressedAt) > emptyWait { break }
             if !idle, still >= 3, !last.isEmpty { Log.write("dictation: button still busy, text settled"); break }
         }
+        if !r.before.isEmpty, !value(&r).contains(r.before) { r.draftChanged = true }
         Log.write(String(format: "dictation: finished in %.1f s, %d chars", Date().timeIntervalSince(pressedAt), last.count))
         return last
     }
@@ -216,7 +251,7 @@ final class ClaudeDictation {
     // MARK: complete
 
     enum Action { case keep, send, queue, discard }
-    enum Outcome { case kept, sent, queued, discarded }
+    enum Outcome { case kept, keptDraftChanged, sent, queued, discarded }
 
     /// What happens to the text Claude left in the composer: kept as a draft, sent with the Send button (queued when
     /// the session is busy and shows Stop instead), queued in Claude with Cmd+Return, or removed. A failed send or
@@ -235,6 +270,9 @@ final class ClaudeDictation {
             case .discard:
                 restore(&r)
                 result = .success(.discarded)
+            case .send where r.draftChanged, .queue where r.draftChanged:
+                Log.write("dictation: the earlier draft changed during the squeeze, left everything as a draft")
+                result = .success(.keptDraftChanged)
             case .send, .queue:
                 // Once Send has been pressed (or Cmd+Return posted), the message counts as delivered even when the
                 // composer can't be seen to empty: with Claude's window out of view its accessibility values go

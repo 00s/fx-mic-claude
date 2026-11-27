@@ -833,7 +833,9 @@ final class AppController {
         }
         let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
         let letters = text.unicodeScalars.filter { CharacterSet.letters.contains($0) }.count
-        guard letters >= 2, speechSeconds >= 0.4, result.confidence >= 0.35 else {
+        // The speech-length check measures FXMic's own input, which in Claude mode may open late (over USB) or serve
+        // only the meter; Claude's text is the evidence that something was said.
+        guard letters >= 2, inComposer || speechSeconds >= 0.4, result.confidence >= 0.35 else {
             Log.write(String(format: "dropped: %@ (%.1fs speech, conf %.2f)", Log.text(text), speechSeconds, result.confidence))
             if inComposer { dictation.complete(serial: serial, action: .discard) { _ in } }
             if activeSqueeze == nil { hud.hide(after: 0.2) }
@@ -909,6 +911,8 @@ final class AppController {
             switch result {
             case .success(.kept):
                 outcome = "Draft in \(name)"; title = "Draft"
+            case .success(.keptDraftChanged):
+                outcome = "Left as a draft in \(name): the earlier draft changed, so it wasn't sent"; title = "Left as draft"
             case .success(.sent):
                 outcome = "Sent to \(name)"
                 if let target { self.watchActivity(target) }
@@ -931,7 +935,7 @@ final class AppController {
             self.recent.insert((Date(), text, outcome), at: 0)
             if self.recent.count > 12 { self.recent.removeLast() }
             self.lastActivity = Date()
-            if self.activeSqueeze == nil { self.hud.sent(text, outcome: outcome, title: title) }
+            if self.activeSqueeze == nil, !outcome.lowercased().contains("copied") { self.hud.sent(text, outcome: outcome, title: title) }
             self.onRecentChange?()
         }
     }

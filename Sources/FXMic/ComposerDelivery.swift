@@ -65,7 +65,7 @@ enum ComposerDelivery {
     static func send(_ text: String, toSessionTitled target: String? = nil, pressSend: Bool = true) throws {
         guard isTrusted else { throw Failure.notTrusted }
         guard let app = ClaudeApp.running else { throw Failure.claudeNotRunning }
-        if ClaudeApp.showIfHidden() { Log.write("Claude was hidden, showed it behind the current app") }
+        if ClaudeApp.showIfHidden(wait: false) { Log.write("Claude was hidden, showed it behind the current app") }
         let axApp = AXUIElementCreateApplication(app.processIdentifier)
         AXUIElementSetAttributeValue(axApp, "AXManualAccessibility" as CFString, kCFBooleanTrue)
         if let target {
