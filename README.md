@@ -11,14 +11,20 @@ Nothing from Teenage Engineering is redistributed here.
 
 ## What it does
 
+The three buttons are named by position and by Teenage Engineering's names for them, the same on every EP-2350:
+**top = FX**, **middle = sample**, **bottom = play**. Their colors differ by model: on the FX mic they are orange,
+white and grey; the ting has its own colors. Built and tested on the FX mic only: the ting runs its own firmware, and
+`tools/build_fxmic_script.py` stops with an error, installing nothing, if its startup script differs where the
+patch goes.
+
 | You do | What happens |
 | --- | --- |
 | squeeze the handle, talk, release | the message is sent the moment you release, pauses included, no time limit |
 | shake the mic hard while squeezing | the message is canceled, nothing is sent |
-| press orange (FX) while squeezing | queue: the message waits until the Claude session finishes its turn, then is sent |
-| press white (sample) while squeezing | draft: the message is added to the composer, after any text already there, and not sent |
-| tap the play button, handle released | the Claude window comes forward; tap again to go back |
-| two quick taps, handle released | the app hangs up (stops listening, orange dot off) |
+| press the top (FX) button while squeezing | queue: the message waits until the Claude session finishes its turn, then is sent |
+| press the middle (sample) button while squeezing | draft: the message is added to the composer, after any text already there, and not sent |
+| tap the bottom (play) button, handle released | the Claude window comes forward; tap again to go back |
+| two quick taps on the bottom (play) button, handle released | the app hangs up (stops listening, orange dot off) |
 | left-click the menu bar handset | pick up or hang up |
 | right-click the menu bar handset | menu: stop/start listening, input device, target session, shake to cancel, activity badge, launch at login, quit |
 | `⌘⇧M` (change it in the menu: "Pick-up shortcut") | pick up or hang up |
@@ -80,7 +86,7 @@ the boot-order discovery and the crash it caused).
 
 - A 3.5 mm TRS cable from the mic's line out to the adapter (any stereo 3.5 mm male-to-male cable).
 - A USB-C data cable for the mic, needed only while installing the script on the mic (a couple of minutes, once).
-- The mic's line out is loud (2 Vrms). Set its orange volume knob under the lid low. The app trims the input gain
+- The mic's line out is loud (2 Vrms). Set its volume knob under the lid low. The app trims the input gain
   after each message and both adapters ended up in the right range on their own.
 
 ## Setup
@@ -122,11 +128,11 @@ stock again.
 
 **Switching modes on the mic.** Claude mode keeps its files in `claude/`, so the disk root stays factory. To switch
 between Claude mode and stock (factory effects and sounds, no marker beeps, for example to use the mic with a
-K.O. II): with the mic on and the handle released, hold the orange FX button for 3 seconds for Claude mode, or the
-white sample button for 3 seconds for stock. The sample LEDs sweep up three times for Claude or down three times for
+K.O. II): with the mic on and the handle released, hold the top (FX) button for 3 seconds for Claude mode, or the
+middle (sample) button for 3 seconds for stock. The sample LEDs sweep up three times for Claude or down three times for
 stock (also when it already was in that mode), and the mode is saved in `claude/mode`. Turn the mic off and on to
 start in that mode. The hold also steps the FX preset or sample once, like any press; that resets at the restart.
-TE's own script gives these buttons no long-press action, and its button combinations (white + grey for recovery,
+TE's own script gives these buttons no long-press action, and its button combinations (sample + play for recovery,
 handle + double-click for the bootloader) only apply while powering on.
 
 **Input closed between squeezes (USB cable).** The tones need the Mac's input open whenever FXMic listens, so macOS
@@ -159,9 +165,9 @@ With Accessibility granted, spoken messages go to whatever Claude view is open, 
 on-device recognizer. Turn on "Transcribe with Claude's dictation" in the menu (or
 `defaults write com.miguel.fxmic transcriptionEngine claude`) and a squeeze drives the Claude app's own dictation
 instead: FXMic presses the mic control next to the composer ("Press and hold to record") through Accessibility,
-presses it again on release, and leaves the text where Claude wrote it, in the session it was spoken into: white
-keeps it as a draft, a plain squeeze presses Send (while Claude is working that sends it as a mid-turn message; if
-Claude shows Stop instead of Send, it queues), orange queues it in
+presses it again on release, and leaves the text where Claude wrote it, in the session it was spoken into: the middle
+(sample) button keeps it as a draft, a plain squeeze presses Send (while Claude is working that sends it as a mid-turn message; if
+Claude shows Stop instead of Send, it queues), the top (FX) button queues it in
 Claude with Cmd+Return. Like dictating by hand, the words are added after any draft already in the composer, and
 Send sends both. That is the same speech-to-text as clicking the mic in Claude, so the words come out
 the same. Apple's recognizer keeps running alongside as the fallback when dictation cannot start, and the log has
@@ -186,7 +192,7 @@ filtered out.
   `tools/install_disk.sh install marker-pack-lowband`, then run the four `defaults write com.miguel.fxmic … -array …`
   commands it prints so FXMic listens for the same pitches, and restart FXMic. `tools/install_disk.sh install` and
   `defaults delete` on those keys go back to the originals.
-- If the input is quiet (the "quiet, turn the orange knob up" hint with the knob already at maximum), lower the
+- If the input is quiet (the "quiet, turn the volume knob up" hint with the knob already at maximum), lower the
   thresholds: `defaults write com.miguel.fxmic chirpMinLevelDb -float -85` for the markers and
   `defaults write com.miguel.fxmic openDb -float -60` so speech still counts, then restart FXMic. The log line
   "tone threshold … speech threshold …" shows the values in use.

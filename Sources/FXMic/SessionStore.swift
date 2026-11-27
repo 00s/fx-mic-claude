@@ -33,7 +33,7 @@ enum SessionStore {
     /// The session used most recently (last focused in the desktop app).
     static func lastUsed() -> ClaudeSession? { recent(limit: 1).first }
 
-    /// Most recently focused sessions first, archived ones excluded.
+    /// Most recently focused sessions first, archived ones and side chats excluded.
     static func recent(limit: Int = 5) -> [ClaudeSession] {
         guard let files = FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.contentModificationDateKey]) else { return [] }
         let iso = ISO8601DateFormatter()
@@ -45,7 +45,11 @@ enum SessionStore {
                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let id = obj["sessionId"] as? String,
                   let title = obj["title"] as? String, !title.isEmpty,
-                  (obj["isArchived"] as? Bool) != true else { continue }
+                  (obj["isArchived"] as? Bool) != true,
+                  // Side chats ("btw", opened from a session) carry btwLoweredFrom. They have no sidebar row, so as
+                  // a target they failed with "not in the sidebar" and cost every squeeze a failed switch (#12).
+                  // Undocumented app internals, like the rest of this file.
+                  !(obj["btwLoweredFrom"] is String) else { continue }
             // Timestamps are epoch milliseconds in current builds; accept ISO strings too.
             func date(_ v: Any?) -> Date? {
                 if let n = v as? Double { return Date(timeIntervalSince1970: n > 1e11 ? n / 1000 : n) }

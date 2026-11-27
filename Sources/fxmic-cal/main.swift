@@ -171,8 +171,8 @@ func closeUtterance() {
     let seconds = w.close()
     writer = nil
     var advice = ""
-    if utterancePeak > -3 { advice = "  <- too hot, turn the orange knob down" }
-    else if utterancePeak < -30 { advice = "  <- quiet, turn the orange knob up" }
+    if utterancePeak > -3 { advice = "  <- too hot, turn the volume knob down" }
+    else if utterancePeak < -30 { advice = "  <- quiet, turn the volume knob up" }
     log(String(format: "saved %@  (%.2f s, peak %@)%@", w.url.lastPathComponent, seconds, db(utterancePeak), advice))
 }
 
