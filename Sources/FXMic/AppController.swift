@@ -853,8 +853,7 @@ final class AppController {
                     try ComposerDelivery.send(text, toSessionTitled: target, pressSend: false)
                     outcome = "Draft in \(target)"
                 } catch {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(text, forType: .string)
+                    copiedToClipboard(text, why: "The draft couldn't be added in Claude")
                     outcome = "Draft failed (\(error)), copied"
                 }
                 hudTitle = "Draft"
@@ -891,7 +890,8 @@ final class AppController {
         recent.insert((Date(), text, outcome), at: 0)
         if recent.count > 12 { recent.removeLast() }
         lastActivity = Date()
-        if activeSqueeze == nil { hud.sent(text, outcome: outcome, title: hudTitle) }
+        // A copied message already has its notice up; "Sent" would be wrong.
+        if activeSqueeze == nil, !outcome.lowercased().contains("copied") { hud.sent(text, outcome: outcome, title: hudTitle) }
         onRecentChange?()
     }
 
@@ -978,16 +978,27 @@ final class AppController {
             Log.write("queue: \(expired ? "waited 30 min, left as draft in" : "sent to") \(item.target): \(Log.text(item.text))")
             if activeSqueeze == nil { hud.sent(item.text, outcome: "", title: expired ? "Queued item left as draft" : "Sent queued message") }
         } catch {
-            Log.write("queue: send failed (\(error)), copied to the clipboard: \(Log.text(item.text))")
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(item.text, forType: .string)
+            Log.write("queue: send failed (\(error)): \(Log.text(item.text))")
+            copiedToClipboard(item.text, why: "A queued message couldn't be sent")
         }
     }
 
     private func inboxOutcome(text: String, result: UtteranceResult, speechSeconds: Double) -> String {
         switch dispatcher.dispatch(text: text, locale: result.locale, confidence: result.confidence, seconds: speechSeconds) {
         case .sent(let target): return "Sent to \(target.title)"
-        case .copied: return "Copied, no session armed"
+        case .copied:
+            copiedToClipboard(text, why: "No Claude session to send it to")
+            return "Copied, no session armed"
+        }
+    }
+
+    /// The last resort: on the clipboard for a minute, with a notice that says so and why.
+    private func copiedToClipboard(_ text: String, why: String) {
+        Clipboard.copyBriefly(text)
+        Log.write("copied to the clipboard (\(why)), cleared in 60 s unless something else is copied")
+        if activeSqueeze == nil {
+            hud.flash("Copied to the clipboard", detail: "\(why). Paste it with ⌘V; it's cleared in a minute.",
+                      tint: .orange, icon: "doc.on.clipboard", seconds: 4)
         }
     }
 
