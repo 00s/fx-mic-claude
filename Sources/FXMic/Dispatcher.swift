@@ -56,13 +56,10 @@ final class Dispatcher {
 
     enum Outcome { case sent(Target), copied }
 
-    /// Appends the utterance to the current target's inbox, or copies it to the clipboard when no session is armed.
+    /// Appends the utterance to the current target's inbox; `.copied` when no session is armed, and the caller puts it
+    /// on the clipboard (briefly, with a notice).
     func dispatch(text: String, locale: String, confidence: Double, seconds: Double) -> Outcome {
-        guard let target = currentTarget else {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(text, forType: .string)
-            return .copied
-        }
+        guard let target = currentTarget else { return .copied }
         append(["type": "utterance", "text": text, "locale": locale, "confidence": (confidence * 100).rounded() / 100, "seconds": (seconds * 10).rounded() / 10], to: target)
         return .sent(target)
     }

@@ -276,8 +276,9 @@ final class HUDController {
     func flash(_ message: String, detail: String = "", tint: Color = .gray, icon: String = "info.circle", seconds: TimeInterval = 1.6) {
         model.title = message
         model.loading = false
-        model.body = ""
+        model.body = detail
         model.footer = ""
+        model.showMeter = false
         model.tint = tint
         model.icon = icon
         model.level = -60
