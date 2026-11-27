@@ -124,11 +124,18 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         let deviceItem = NSMenuItem(title: "Input device", action: nil, keyEquivalent: "")
         deviceItem.submenu = deviceMenu
         menu.addItem(deviceItem)
-        // How squeezes reach FXMic: over the mic's USB console (input closed between squeezes) or as tones.
-        let trigger = NSMenuItem(title: controller.usbLiveMain ? "Squeezes over USB: input closed between squeezes"
-                                                               : "Squeezes heard as tones: input open while listening",
-                                 action: nil, keyEquivalent: "")
+        // Mic open only while squeezing: needs the mic's USB cable, since without it the tones are the only signal and
+        // FXMic must keep the input open to hear them. The line under it says which is happening right now.
+        let usbItem = NSMenuItem(title: "Mic open only while squeezing (USB cable)", action: #selector(toggleUSB), keyEquivalent: "")
+        usbItem.target = self; usbItem.state = Settings.shared.usbTrigger ? .on : .off
+        menu.addItem(usbItem)
+        let status: String
+        if controller.usbLiveMain { status = "Now: closed between squeezes, over USB" }
+        else if Settings.shared.usbTrigger { status = "Now: mic not on USB, listening for tones" }
+        else { status = "Now: listening for tones" }
+        let trigger = NSMenuItem(title: status, action: nil, keyEquivalent: "")
         trigger.isEnabled = false
+        trigger.indentationLevel = 1
         menu.addItem(trigger)
         menu.addItem(.separator())
 
@@ -203,6 +210,10 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     @objc private func toggleEngine() {
         Settings.shared.transcriptionEngine = Settings.shared.transcriptionEngine == "claude" ? "apple" : "claude"
         Log.write("transcription engine: \(Settings.shared.transcriptionEngine)")
+    }
+    @objc private func toggleUSB() {
+        Settings.shared.usbTrigger.toggle()
+        controller.setUSBTrigger(Settings.shared.usbTrigger)
     }
     @objc private func toggleFallback() {
         Settings.shared.appleFallback.toggle()
