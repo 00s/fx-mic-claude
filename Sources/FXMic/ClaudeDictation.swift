@@ -88,9 +88,26 @@ final class ClaudeDictation {
             let l = label(el).lowercased()
             return labels.contains { l.contains($0) } && !l.contains("voice mode")
         }
-        guard let button = candidates.first else {
+        guard var button = candidates.first else {
             logButtons(window: window, composer: composer, why: "no match for \(labels)")
             return .failure(.noButton)
+        }
+        // Claude may already be dictating (left on by hand, or by an FXMic that quit mid-squeeze). Pressing would
+        // then stop it while FXMic believes it started, and every later squeeze would flip it the wrong way. Stop
+        // that dictation first, wait for the idle label, then start a fresh one.
+        if Self.isListening(label(button)) {
+            Log.write("dictation: Claude was already dictating, stopping that first")
+            AXUIElementPerformAction(button, kAXPressAction as CFString)
+            let center = AX.frame(button)
+            for _ in 0..<20 {
+                Thread.sleep(forTimeInterval: 0.1)
+                if let b = self.button(at: CGPoint(x: center.midX, y: center.midY), in: window), !Self.isListening(label(b)) {
+                    button = b
+                    break
+                }
+            }
+            guard !Self.isListening(label(button)) else { return .failure(.noButton) }
+            Thread.sleep(forTimeInterval: 0.3)       // let the stopped dictation's text settle into the composer
         }
         let idleLabel = label(button)
         let f = AX.frame(button)
@@ -146,6 +163,9 @@ final class ClaudeDictation {
 
     private var dictationLabels: [String] { Settings.shared.dictationButtonLabels.map { $0.lowercased() } }
 
+    /// The dictation control reads "Stop dictation" (or another "stop …") while Claude is listening.
+    static func isListening(_ label: String) -> Bool { label.lowercased().contains("stop") }
+
     private func end(_ r: inout Run) -> String {
         let pressedAt = Date()
         if let button = button(at: r.buttonCenter, in: r.window) {
@@ -156,7 +176,7 @@ final class ClaudeDictation {
             let isDictation = lower.contains("dictat") || dictationLabels.contains { lower.contains($0) }
             if !isDictation {
                 Log.write("dictation: the control at the dictation button's place is \"\(l)\", not pressed")
-            } else if r.labelChanged, l == r.idleLabel {
+            } else if !Self.isListening(l), r.labelChanged, l == r.idleLabel {
                 Log.write("dictation: Claude had already stopped listening, not pressed")
             } else if AXUIElementPerformAction(button, kAXPressAction as CFString) != .success {
                 Log.write("dictation: stop press failed on \"\(l)\"")

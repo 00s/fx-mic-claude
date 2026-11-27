@@ -21,7 +21,7 @@ Nothing from Teenage Engineering is redistributed here.
 | two quick taps, handle released | the app hangs up (stops listening, orange dot off) |
 | left-click the menu bar handset | pick up or hang up |
 | right-click the menu bar handset | menu: stop/start listening, input device, target session, shake to cancel, activity badge, launch at login, quit |
-| `⌃⌥Space` | pick up or hang up |
+| `⌘⇧M` (change it in the menu: "Pick-up shortcut") | pick up or hang up |
 
 English and Spanish are both recognized, chosen per message. The app hangs up by itself after 20 minutes without a
 squeeze, which is when the mic turns itself off too. A small toast slides down from the top of the screen while you squeeze, showing "Listening", a level
@@ -135,7 +135,10 @@ script also prints each event on its serial console ("fxmic press", "fxmic relea
 "fxmic cancel", "fxmic tap", and "fxmic hi" about every 2 s). While those lines arrive, FXMic takes squeezes from
 there and keeps the input closed between them. The menu's "Mic open only while squeezing (USB cable)" turns this on
 or off, and the line under it says what is happening now: "closed between squeezes, over USB", "mic not on USB,
-listening for tones", or "listening for tones".
+listening for tones", or "listening for tones". With the cable in, the mic can also pick up after FXMic hung up
+(after two taps on play, or 20 minutes without a squeeze): a squeeze picks up and starts the message, a tap on play
+only picks up. Without the cable, a hung-up FXMic hears nothing, so pick up from the Mac (click the handset or the
+shortcut).
 It opens the input at the squeeze (in 70 to 180 ms here) and closes it at the release, for the level meter and,
 when wanted, Apple's recognizer. With Claude's dictation the mic is open for the squeeze anyway, and with "Apple's
 recognizer as fallback" off FXMic only measures the level and transcribes nothing. On batteries, with a charge-only cable or with an older script, no lines arrive and FXMic goes back

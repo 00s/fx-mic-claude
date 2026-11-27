@@ -61,6 +61,10 @@ final class AppController {
     private(set) var usbLiveMain = false
     private var squeezeStartedAt = Date.distantPast       // pipeline
     private var pendingTap: DispatchWorkItem?             // main
+    /// A squeeze reported over USB while hung up: FXMic picks up first, then starts it (pipeline).
+    private var pendingWakeSqueeze = false
+    /// Taps right after a tap picked FXMic up are ignored, so a double tap doesn't pick up and act at once (main).
+    private var ignoreTapsUntil = Date.distantPast
 
     // Pipeline state, pipeline queue only.
     private var capture: InputCapture?
@@ -648,7 +652,35 @@ final class AppController {
     }
 
     private func usbEvent(_ event: MicSerial.Event) {
-        guard usbLive, state != .idle, !replayActive else { return }
+        guard usbLive, !replayActive else { return }
+        // Hung up: the mic can still pick up over USB (the tones can't be heard then). A squeeze picks up and starts
+        // the message; a tap on the play button only picks up.
+        if state == .idle {
+            switch event {
+            case .press:
+                pendingWakeSqueeze = true
+                DispatchQueue.main.async {
+                    Log.write("usb: squeeze while hung up, picking up")
+                    self.arm()
+                    self.pipeline.async {
+                        guard self.pendingWakeSqueeze else { return }
+                        self.pendingWakeSqueeze = false
+                        if self.state != .idle, !self.handleMode { self.squeezeStarted() }
+                    }
+                }
+            case .release:
+                pendingWakeSqueeze = false          // released before FXMic was ready: too short to be a message
+            case .tap:
+                DispatchQueue.main.async {
+                    Log.write("usb: tap while hung up, picking up")
+                    self.ignoreTapsUntil = Date().addingTimeInterval(0.6)
+                    self.arm()
+                }
+            default:
+                break
+            }
+            return
+        }
         switch event {
         case .hi: break
         case .press: if !handleMode { squeezeStarted() }
@@ -661,6 +693,16 @@ final class AppController {
     }
 
     // MARK: USB trigger (main)
+
+    /// Registers the pick-up / hang-up shortcut from the settings. False when another app owns that combination.
+    @discardableResult
+    func registerHotKey() -> Bool {
+        let ok = HotKey.register(keyCode: UInt32(settings.hotKeyCode), modifiers: UInt32(settings.hotKeyModifiers)) { [weak self] in
+            self?.toggleArmed(source: "hotkey")
+        }
+        Log.write("shortcut \(settings.hotKeyLabel): " + (ok ? "registered" : "not available, another app may use it"))
+        return ok
+    }
 
     /// The menu switch: watch the mic's USB console, or ignore it and always use the tones.
     func setUSBTrigger(_ on: Bool) {
@@ -715,6 +757,7 @@ final class AppController {
 
     /// The mic reports each press of the play button; two within 450 ms are a double tap, like the tone detector.
     private func usbTap() {
+        if Date() < ignoreTapsUntil { return }
         if let pending = pendingTap {
             pending.cancel()
             pendingTap = nil
