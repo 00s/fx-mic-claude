@@ -949,7 +949,7 @@ final class AppController {
     /// Records the queue/draft choice for the squeeze in progress and shows it in the Listening bar. Capture queue.
     private func setIntent(_ intent: Intent) {
         let serial = utteranceSerial
-        Log.write("during squeeze: \(intent == .queue ? "orange pressed: queue" : "white pressed: draft")")
+        Log.write("during squeeze: \(intent == .queue ? "top (FX) button: queue" : "middle (sample) button: draft")")
         DispatchQueue.main.async {
             self.intents[serial] = intent
             self.hud.mode(intent == .queue ? "Queue" : "Draft")
