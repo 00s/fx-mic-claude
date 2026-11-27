@@ -160,7 +160,8 @@ on-device recognizer. Turn on "Transcribe with Claude's dictation" in the menu (
 `defaults write com.miguel.fxmic transcriptionEngine claude`) and a squeeze drives the Claude app's own dictation
 instead: FXMic presses the mic control next to the composer ("Press and hold to record") through Accessibility,
 presses it again on release, and leaves the text where Claude wrote it, in the session it was spoken into: white
-keeps it as a draft, a plain squeeze presses Send (or queues when the session is busy), orange queues it in
+keeps it as a draft, a plain squeeze presses Send (while Claude is working that sends it as a mid-turn message; if
+Claude shows Stop instead of Send, it queues), orange queues it in
 Claude with Cmd+Return. Like dictating by hand, the words are added after any draft already in the composer, and
 Send sends both. That is the same speech-to-text as clicking the mic in Claude, so the words come out
 the same. Apple's recognizer keeps running alongside as the fallback when dictation cannot start, and the log has

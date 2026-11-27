@@ -35,6 +35,8 @@ final class ClaudeDictation {
         let buttonCenter: CGPoint
         let idleLabel: String
         var labelChanged = false
+        /// Claude was seen opening the microphone (its label did not update: window out of view).
+        var micSeen = false
         /// What the composer held when the squeeze began: a draft, or "".
         let before: String
     }
@@ -73,6 +75,7 @@ final class ClaudeDictation {
     private func begin(serial: Int, target: String?) -> Result<String, Failure> {
         guard AX.isTrusted else { return .failure(.notTrusted) }
         guard let app = ClaudeApp.running else { return .failure(.claudeNotRunning) }
+        if ClaudeApp.showIfHidden() { Log.write("dictation: Claude was hidden, showed it behind the current app") }
         let axApp = AXUIElementCreateApplication(app.processIdentifier)
         AXUIElementSetAttributeValue(axApp, "AXManualAccessibility" as CFString, kCFBooleanTrue)
         if let target, let found = ComposerDelivery.locateComposer(axApp) {
@@ -95,18 +98,19 @@ final class ClaudeDictation {
         // Claude may already be dictating (left on by hand, or by an FXMic that quit mid-squeeze). Pressing would
         // then stop it while FXMic believes it started, and every later squeeze would flip it the wrong way. Stop
         // that dictation first, wait for the idle label, then start a fresh one.
-        if Self.isListening(label(button)) {
+        if Self.isListening(label(button)) || ClaudeApp.isUsingMic() {
             Log.write("dictation: Claude was already dictating, stopping that first")
             AXUIElementPerformAction(button, kAXPressAction as CFString)
             let center = AX.frame(button)
             for _ in 0..<20 {
                 Thread.sleep(forTimeInterval: 0.1)
-                if let b = self.button(at: CGPoint(x: center.midX, y: center.midY), in: window), !Self.isListening(label(b)) {
+                if let b = self.button(at: CGPoint(x: center.midX, y: center.midY), in: window), !Self.isListening(label(b)),
+                   !ClaudeApp.isUsingMic() {
                     button = b
                     break
                 }
             }
-            guard !Self.isListening(label(button)) else { return .failure(.noButton) }
+            guard !Self.isListening(label(button)), !ClaudeApp.isUsingMic() else { return .failure(.noButton) }
             Thread.sleep(forTimeInterval: 0.3)       // let the stopped dictation's text settle into the composer
         }
         let idleLabel = label(button)
@@ -115,15 +119,18 @@ final class ClaudeDictation {
         guard AXUIElementPerformAction(button, kAXPressAction as CFString) == .success else { return .failure(.noButton) }
         var current = Run(serial: serial, axApp: axApp, window: window, composer: composer,
                           buttonCenter: CGPoint(x: f.midX, y: f.midY), idleLabel: idleLabel, before: before)
-        // Listening shows as a change of the button's label ("Stop dictation" and the like). Up to 2 s.
+        // Listening shows as a change of the button's label ("Stop dictation" and the like), or, when Claude's window is
+        // out of view and its label goes stale, as Claude opening the microphone. Up to 2 s.
         var nowLabel = idleLabel
         for _ in 0..<20 {
             Thread.sleep(forTimeInterval: 0.1)
             nowLabel = buttonLabel(current) ?? idleLabel
             if nowLabel != idleLabel { current.labelChanged = true; break }
+            if ClaudeApp.isUsingMic() { current.micSeen = true; break }
         }
         run = current
-        Log.write("dictation: pressed \"\(idleLabel)\"" + (current.labelChanged ? ", now \"\(nowLabel)\"" : ", label unchanged after 2 s")
+        Log.write("dictation: pressed \"\(idleLabel)\"" + (current.labelChanged ? ", now \"\(nowLabel)\""
+                  : current.micSeen ? ", Claude has the mic (label not updated: window out of view)" : ", label unchanged after 2 s")
                   + (before.isEmpty ? "" : ", composer draft kept aside (\(before.count) chars)"))
         startPolling()
         return .success(ComposerDelivery.activeSessionTitle(in: window) ?? "")
@@ -176,7 +183,7 @@ final class ClaudeDictation {
             let isDictation = lower.contains("dictat") || dictationLabels.contains { lower.contains($0) }
             if !isDictation {
                 Log.write("dictation: the control at the dictation button's place is \"\(l)\", not pressed")
-            } else if !Self.isListening(l), r.labelChanged, l == r.idleLabel {
+            } else if !Self.isListening(l), r.labelChanged || r.micSeen, l == r.idleLabel, !ClaudeApp.isUsingMic() {
                 Log.write("dictation: Claude had already stopped listening, not pressed")
             } else if AXUIElementPerformAction(button, kAXPressAction as CFString) != .success {
                 Log.write("dictation: stop press failed on \"\(l)\"")
@@ -190,13 +197,14 @@ final class ClaudeDictation {
         // changed (nothing to watch), the text has to hold still longer.
         var last = ""
         var lastChange = Date()
-        let settle: TimeInterval = r.labelChanged ? 0.35 : 1.2
-        let emptyWait: TimeInterval = r.labelChanged ? 2.0 : 4.0
+        let tracked = r.labelChanged || r.micSeen          // something tells us when Claude stops listening
+        let settle: TimeInterval = tracked ? 0.35 : 1.2
+        let emptyWait: TimeInterval = tracked ? 2.0 : 4.0
         while Date().timeIntervalSince(pressedAt) < 10 {
             Thread.sleep(forTimeInterval: 0.15)
             let text = dictated(value(&r), before: r.before)
             if text != last { last = text; lastChange = Date() }
-            let idle = !r.labelChanged || buttonLabel(r) == r.idleLabel
+            let idle = r.micSeen ? !ClaudeApp.isUsingMic() : (!r.labelChanged || buttonLabel(r) == r.idleLabel)
             let still = Date().timeIntervalSince(lastChange)
             if idle, still >= settle, !last.isEmpty || Date().timeIntervalSince(pressedAt) > emptyWait { break }
             if !idle, still >= 3, !last.isEmpty { Log.write("dictation: button still busy, text settled"); break }
@@ -228,9 +236,17 @@ final class ClaudeDictation {
                 restore(&r)
                 result = .success(.discarded)
             case .send, .queue:
+                // Once Send has been pressed (or Cmd+Return posted), the message counts as delivered even when the
+                // composer can't be seen to empty: with Claude's window out of view its accessibility values go
+                // stale, and delivering the text again another way sent it twice. Only a press that never happened
+                // puts the composer back and lets the caller deliver it another way.
                 if action == .send, let send = buttonNear(r, labeled: "Send") {
-                    AXUIElementPerformAction(send, kAXPressAction as CFString)
-                    result = composerEmpties(&r) ? .success(.sent) : .failure(.notSent)
+                    if AXUIElementPerformAction(send, kAXPressAction as CFString) == .success {
+                        if !composerEmpties(&r) { Log.write("dictation: pressed Send, could not confirm (Claude's window out of view?)") }
+                        result = .success(.sent)
+                    } else {
+                        result = .failure(.notSent)
+                    }
                 } else {
                     if action == .send { Log.write("dictation: no Send button (session busy), queueing instead") }
                     result = queueInClaude(&r) ? .success(.queued) : .failure(.notSent)
@@ -252,9 +268,11 @@ final class ClaudeDictation {
             event?.flags = .maskCommand
             event?.postToPid(app.processIdentifier)
         }
-        let ok = composerEmpties(&r)
-        Log.write(ok ? "dictation: queued in Claude with Cmd+Return" : "dictation: Cmd+Return left the text in the composer")
-        return ok
+        // Posted: count it as queued even if the composer can't be seen to empty (stale values out of view); a second
+        // delivery would duplicate it.
+        Log.write(composerEmpties(&r) ? "dictation: queued in Claude with Cmd+Return"
+                                      : "dictation: Cmd+Return posted, could not confirm (Claude's window out of view?)")
+        return true
     }
 
     private func composerEmpties(_ r: inout Run) -> Bool {
