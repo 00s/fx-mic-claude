@@ -129,6 +129,18 @@ start in that mode. The hold also steps the FX preset or sample once, like any p
 TE's own script gives these buttons no long-press action, and its button combinations (white + grey for recovery,
 handle + double-click for the bootloader) only apply while powering on.
 
+**Input closed between squeezes (USB cable).** The tones need the Mac's input open whenever FXMic listens, so macOS
+shows the orange microphone dot the whole time. If the mic stays connected to the Mac with a USB-C data cable, its
+script also prints each event on its serial console ("fxmic press", "fxmic release", "fxmic queue", "fxmic draft",
+"fxmic cancel", "fxmic tap", and "fxmic hi" about every 2 s). While those lines arrive, FXMic takes squeezes from
+there and keeps the input closed between them; the menu says "Squeezes over USB: input closed between squeezes".
+It opens the input at the squeeze (in 70 to 180 ms here) and closes it at the release, for the level meter and,
+when wanted, Apple's recognizer. With Claude's dictation the mic is open for the squeeze anyway, and with "Apple's
+recognizer as fallback" off FXMic only measures the level and transcribes nothing. On batteries, with a charge-only cable or with an older script, no lines arrive and FXMic goes back
+to the tones within 5 s, mid-squeeze too. The tones still play either way. FXMic only reads the port, never writes
+to it or touches its modem lines, and holds it exclusively: quit FXMic before running `tools/mp_exec.py` or
+`build_fxmic_script.py --from-device`. Turn it off with `defaults write com.miguel.fxmic usbTrigger -bool false`.
+
 Do not use `mpremote` or any pyserial-based tool on the mic's serial port: opening the port with modem-line toggling
 resets the mic. `tools/mp_exec.py` runs code over the raw REPL without that.
 
@@ -147,7 +159,8 @@ keeps it as a draft, a plain squeeze presses Send (or queues when the session is
 Claude with Cmd+Return. Like dictating by hand, the words are added after any draft already in the composer, and
 Send sends both. That is the same speech-to-text as clicking the mic in Claude, so the words come out
 the same. Apple's recognizer keeps running alongside as the fallback when dictation cannot start, and the log shows
-both transcripts of every message ("compare: claude: … | apple …"). The Claude window has to show a composer
+both transcripts of every message ("compare: claude: … | apple …"). Turn the fallback off with the menu's "Apple's
+recognizer as fallback" (`appleFallback`); a squeeze whose dictation fails to start is then lost. The Claude window has to show a composer
 with the mic control. Claude starts listening 0.4 to 1 s after the squeeze, so wait for "Listening" in the bar
 before talking. If Claude renames the control, list what is next to the composer with `touch ~/.fxmic/axdump`
 (written to the log) and set `defaults write com.miguel.fxmic dictationButtonLabels -array "<part of the label>"`.
