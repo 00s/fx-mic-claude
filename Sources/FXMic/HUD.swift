@@ -262,12 +262,17 @@ struct IslandStack<Action: View>: View {
 
 /// True on the panel, which is one sheet of Liquid Glass: the pieces on it are plain fills, never glass on glass.
 private struct OnSheetKey: EnvironmentKey { static let defaultValue = false }
+/// On the sheet, the fill of a neutral piece; nil is the usual quiet one. The README's device mockup sets it, so the
+/// island reads as frosted glass over the drawn screen.
+private struct SheetFillKey: EnvironmentKey { static let defaultValue: Color? = nil }
 extension EnvironmentValues {
     var onSheet: Bool { get { self[OnSheetKey.self] } set { self[OnSheetKey.self] = newValue } }
+    var sheetFill: Color? { get { self[SheetFillKey.self] } set { self[SheetFillKey.self] = newValue } }
 }
 
 struct Frosted<S: Shape>: ViewModifier {
     @Environment(\.onSheet) private var onSheet
+    @Environment(\.sheetFill) private var sheetFill
     @Environment(\.colorScheme) private var scheme
     let shape: S
     let tint: Color
@@ -276,7 +281,7 @@ struct Frosted<S: Shape>: ViewModifier {
             // The neutral tints are for glass over the screen; on the sheet they would muddy it, so only a color stays.
             let ink = Ink.of(scheme)
             let neutral = tint == ink.dense || tint == ink.wash
-            content.background(neutral ? ink.primary.opacity(0.07) : tint, in: shape)
+            content.background(neutral ? sheetFill ?? ink.primary.opacity(0.07) : tint, in: shape)
         } else {
             content.glassEffect(.regular.tint(tint).interactive(), in: shape).background(.ultraThinMaterial, in: shape)
         }
@@ -293,11 +298,12 @@ extension View {
 /// The rail's track: frost where it floats over the screen, a quiet fill on the panel's sheet.
 private struct RailTrack: ViewModifier {
     @Environment(\.onSheet) private var onSheet
+    @Environment(\.sheetFill) private var sheetFill
     @Environment(\.colorScheme) private var scheme
     func body(content: Content) -> some View {
         let ink = Ink.of(scheme), shape = RoundedRectangle(cornerRadius: Metric.card, style: .continuous)
         if onSheet {
-            content.background(ink.primary.opacity(0.07), in: shape)
+            content.background(sheetFill ?? ink.primary.opacity(0.07), in: shape)
         } else {
             content.background(ink.dense, in: shape).background(.regularMaterial, in: shape)
         }

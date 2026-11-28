@@ -76,6 +76,8 @@ struct MicDemo: View {
     @ObservedObject var live: LiveMic
     @ObservedObject var island: HUDModel
     @State private var started = Date()
+    /// Seconds into the loop, fixed, for exporting frames (the docs' GIFs); nil runs on the clock.
+    var at: Double? = nil
 
     func hex(_ h: UInt32) -> Color {
         Color(.sRGB, red: Double(h >> 16 & 255) / 255, green: Double(h >> 8 & 255) / 255, blue: Double(h & 255) / 255, opacity: 1)
@@ -93,7 +95,7 @@ struct MicDemo: View {
             let now = timeline.date
             let isLive = live.busy(at: now)
             let steps = chosen.steps
-            let t = max(0, now.timeIntervalSince(started)).truncatingRemainder(dividingBy: chosen.demoSeconds)
+            let t = (at ?? max(0, now.timeIntervalSince(started))).truncatingRemainder(dividingBy: chosen.demoSeconds)
             let (index, u) = locate(steps, t)
             let step = steps[index]
             let previous = steps[(index + steps.count - 1) % steps.count]

@@ -1,277 +1,139 @@
 # Squeeze
 
-Squeeze (formerly FXMic) is push-to-talk into Claude with a Teenage Engineering EP-2350 FX mic. Squeeze the handle from any app, talk, release,
-and your words land in the Claude desktop app as your own message. No cable to the mic, no hotkeys, no waiting for a
-pause. A menu bar app on the Mac does the listening and transcription; a small script on the mic's own disk turns the
-handle and a shake into marker tones that ride the audio line.
+Push-to-talk into Claude with the Teenage Engineering EP-2350 FX mic. Squeeze the handle from any app, talk, let go:
+your words land in the Claude desktop app as your own message.
 
-Built and tested on a MacBook Pro (M4, macOS 26) with an EP-2350 on OS 1.1.2, connected either through a TRS-to-TRRS
-adapter into the headphone jack or through a Sabrent AU-UCMA USB audio adapter. Personal project, MIT licensed.
-Nothing from Teenage Engineering is redistributed here.
+<p align="center">
+  <img alt="A laptop showing Claude with the Squeeze island at the top of the screen: Listening in yellow, the conversation the words go to, and the live transcript, which also appears in Claude's composer. Beside the laptop, the EP-2350 FX mic with its handle squeezed." src="docs/images/hero.png" width="760">
+</p>
 
-## What it does
+Squeeze is a menu bar app for macOS 26, plus a small script on the mic's own disk. Tested with an EP-2350 FX mic on
+OS 1.1.2. MIT licensed; nothing from Teenage Engineering is redistributed.
 
-The three buttons are named by position and by Teenage Engineering's names for them, the same on every EP-2350:
-**top = FX**, **middle = sample**, **bottom = play**. Their colors differ by model: on the FX mic they are orange,
-white and grey; the ting has its own colors. Built and tested on the FX mic only: the ting runs its own firmware, and
-`tools/build_fxmic_script.py` stops with an error, installing nothing, if its startup script differs where the
-patch goes.
+## Gestures
 
-| You do | What happens |
-| --- | --- |
-| squeeze the handle, talk, release | the message is sent the moment you release, pauses included, no time limit |
-| shake the mic hard while squeezing | the message is canceled, nothing is sent |
-| press the top (FX) button while squeezing | queue: the message waits until the Claude session finishes its turn, then is sent |
-| press the middle (sample) button while squeezing | draft: the message is added to the composer, after any text already there, and not sent |
-| tap the bottom (play) button, handle released | opens or closes the Squeeze panel; change it under Settings, "Bottom button" (bring Claude forward, show or hide Claude, or nothing) |
-| two quick taps on the bottom (play) button, handle released | the app mutes (stops listening, orange dot off) |
-| click the menu bar mic icon | the panel: live state and transcript, where messages go, mic gestures, settings |
-| right-click the menu bar mic icon | mute or unmute (Option-click: a plain menu) |
-| `⌘⇧M` (change it in the menu: "Mute shortcut") | mute or unmute |
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/gestures-dark.png">
+  <img alt="Gestures while squeezing: release to send, top button to queue, middle button to draft, shake to cancel. With the handle released: bottom button opens the panel, press it twice to mute, hold top for Claude mode, hold middle for K.O. II mode." src="docs/images/gestures-light.png" width="480">
+</picture>
 
-Muting is for the audio cable, where listening means the input stays open. With the mic on USB the input is already
-closed between squeezes, so there is no mute button, a double tap does nothing, and a squeeze always works.
+<table>
+  <tr>
+    <td width="50%"><img alt="Squeeze, talk, let go: the words go up into the conversation." src="docs/images/gesture-send.gif"><br><b>Send.</b> Let go and it's sent, pauses included.</td>
+    <td width="50%"><img alt="Press the top button while squeezing: the message waits with a clock." src="docs/images/gesture-queue.gif"><br><b>Queue.</b> Waits until Claude finishes its turn, then sends.</td>
+  </tr>
+  <tr>
+    <td width="50%"><img alt="Press the middle button while squeezing: the words stay in the composer." src="docs/images/gesture-draft.gif"><br><b>Draft.</b> Stays in the composer, unsent.</td>
+    <td width="50%"><img alt="Shake while squeezing: the words are dropped." src="docs/images/gesture-cancel.gif"><br><b>Cancel.</b> Nothing is sent.</td>
+  </tr>
+</table>
 
-English and Spanish are both recognized, chosen per message. The app mutes itself after 20 minutes without a
-squeeze, which is when the mic turns itself off too. A small island slides down from the top of the screen while you squeeze: "Listening", with color that
-flows with your voice, the conversation the words go to, the live transcript, all of it, growing downward as you talk
-(a message too long for the screen scrolls, following the end), and what the release can do. With the panel open, the
-panel shows the same thing instead. It switches to "Sending…" when you release and
-"Sent" with the final text when it lands, then slides away; it never takes focus.
-The live text comes from a second, faster recognizer: first words about 1 s after you start talking, then about once a
-second. The sent text still comes from the accurate recognizer. Settings (`defaults write com.miguel.fxmic …`, then
-restart Squeeze): `hudTranscript -bool false` hides the text, `livePreview -bool false` drops the fast recognizer (live
-text then arrives in bursts a few seconds late), `fastLiveText -bool true` makes every recognizer fast, the sent text
-included, at some cost in accuracy.
+The buttons are named by position: **top** (FX, orange), **middle** (sample, white), **bottom** (play, grey). While
+squeezing you can also click the same choices on the island.
 
-Queue and draft show in the island as soon as the button is pressed ("Listening · Queue" with an orange clock,
-"Listening · Draft" with a blue pencil). Pressing the other button later in the same squeeze switches; the last one
-pressed wins. On release the island reads "Queueing…" or "Adding to draft…" instead of "Sending…". A queued message
-goes out as soon as the session is idle, so it is sent right away when Claude is not working. Queued messages go one
-at a time, at least 10 s apart; one still waiting after 30 minutes is left in the composer as a draft. Whether a session
-is working is read from the desktop app's own session files (`latestUserFrameAt` newer than `lastTurnEdgeAt`), an
-undocumented detail that may change.
-The menu bar mic icon then follows the session you sent to: three pulsing dots in its corner while Claude works, a
-check for two seconds when it finishes.
+With the handle released, the bottom button opens the Squeeze panel (or brings Claude forward, your choice in
+Settings), and two quick taps mute. Hold the top button for 3 s for Claude mode, or the middle one for the mic's
+factory mode, for example to sample into a K.O. II.
+
+## The island
+
+While you squeeze, an island at the top of the screen shows that Squeeze is listening, which conversation the words
+go to, and the live transcript. It never takes focus. Wait for yellow before you talk: grey means Claude is still
+starting to listen.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/states-dark.png">
+  <img alt="Island states: Starting (grey), Sent (green), Listening · Queue (orange), Nothing to send, Listening · Draft (blue), Canceled." src="docs/images/states-light.png" width="640">
+</picture>
 
 ## How it works
 
-The EP-2350 puts nothing on the wire except sound: its USB-C port is power and a disk, and its only output is a
-3.5 mm line out. Worse, the mic outputs digital silence whenever you are quiet, squeezed or not, so a Mac listening to
-the audio cannot tell a pause from a release. The mic runs MicroPython, though, and executes a `main.py` from its
-disk at boot in place of the built-in startup. So:
+```mermaid
+flowchart LR
+  mic["EP-2350<br/>script on its disk"] -- "tones on the audio line<br/>or reports over USB" --> app["Squeeze<br/>menu bar app"]
+  app -- "voice" --> stt["Apple's recognizer<br/>or Claude's dictation"]
+  stt --> claude["Claude's composer<br/>(Accessibility)"]
+```
 
-1. **On the mic** (`firmware/`): a startup script that is TE's own script plus a few additions. On the 60 Hz tick it
-   reads the handle position and the accelerometer, and plays short sample tones: 17 + 18.5 kHz when the handle passes
-   half travel, 14 + 15 kHz when it is released, 12 + 13 kHz when the mic is shaken hard while squeezed. The play
-   button plays a 15.5 + 16.5 kHz chirp. All four are one-shot samples on the mic's four sample slots.
-2. **On the Mac** (`Sources/`): the Squeeze menu bar app taps the audio input device by its identifier (the Sabrent, not
-   the system default input), detects the tones with Goertzel filters, and treats the press marker as "message
-   starts" and the release marker as "message ends". Speech in between goes to Apple's on-device speech recognizer,
-   two locales at once (en-US and es-MX), and the more confident transcript wins about 100 ms after release. Tones
-   are above 8 kHz and vanish in the recognizer's 16 kHz resampling.
-3. **Into Claude**: the app sets the text of the Claude desktop app's composer through the Accessibility API and
-   presses its Send button, never touching focus, so the message appears as one you typed. A typed draft in the
-   composer is set aside and restored. Without Accessibility access it falls back to a file inbox that a Claude Code
-   session watches after running `/fxmic`.
+The mic sends nothing but sound, so its script plays short marker tones above speech when you squeeze, let go, shake
+or press a button. Squeeze listens for them on the input device. With the mic also on a USB-C data cable, the
+script reports the same events over USB and Squeeze keeps the Mac's input closed between squeezes.
 
-`PLAN.md` is the engineering log with every measurement and dead end (pilot tones, hold playmode, silence timeouts,
-the boot-order discovery and the crash it caused).
+The words come from Apple's on-device recognizer (English and Spanish), or from Claude's own dictation, which is
+more accurate. Squeeze then types them into Claude's composer and presses Send, the same as you would.
+
+[PLAN.md](PLAN.md) is the engineering log with every measurement and dead end.
 
 ## What you need
 
-- A [Teenage Engineering EP-2350 FX mic](https://teenage.engineering/store/ep-2350) on firmware 1.1.2 or later ([guide](https://teenage.engineering/guides/ep-2350), [downloads](https://teenage.engineering/downloads/ep-2350)) with two AAA batteries. Firmware 1.0.9 to 1.1.1 cannot load the marker sounds from `config.json`, so squeezes go unnoticed; `tools/build_fxmic_script.py --from-device` prints the version and warns.
-- A Mac running macOS 26 with the Xcode command line tools installed (`xcode-select --install`).
-- A way to feed the mic's 3.5 mm line output into the Mac as a microphone input. Two options are tested:
+- An [EP-2350 FX mic](https://teenage.engineering/store/ep-2350) on firmware 1.1.2 or later, with batteries.
+- A Mac on macOS 26 with the Xcode command line tools (`xcode-select --install`).
+- A way to get the mic's 3.5 mm line out into the Mac as a microphone:
 
-| option | what it is | pros | cons |
-| --- | --- | --- | --- |
-| **Headphone jack** (Miguel's daily setup) | a TRS-to-TRRS adapter such as the [Movo MC3](https://www.amazon.com/dp/B01N9CJDVE) from the mic's 3.5 mm cable straight into the MacBook's headphone jack | nothing else to carry, no USB port used, shows up as "External Microphone" | the moment it is plugged in, macOS also moves sound **output** to the jack, so pick "MacBook Pro Speakers" again under System Settings > Sound > Output (or in the Control Center sound menu). Once per plug-in. |
-| **USB audio adapter** | a USB-C dongle with a 3.5 mm mic input, such as the Sabrent AU-UCMA ([Amazon](https://www.amazon.com/dp/B0DGMVFY85), [Sabrent](https://sabrent.com/products/au-ucma)), shows up as "USB Advanced Audio Device" | speakers untouched, works on any Mac | one more dongle and a USB-C port |
+  | | Headphone jack | USB audio adapter |
+  | --- | --- | --- |
+  | What | A TRS-to-TRRS adapter, such as the [Movo MC3](https://www.amazon.com/dp/B01N9CJDVE) | A USB-C dongle with a mic input, such as the Sabrent [AU-UCMA](https://sabrent.com/products/au-ucma) |
+  | Shows up as | External Microphone | USB Advanced Audio Device |
+  | Catch | macOS moves sound output to the jack; pick your speakers again in Sound settings | One more dongle |
 
-- A 3.5 mm TRS cable from the mic's line out to the adapter (any stereo 3.5 mm male-to-male cable).
-- A USB-C data cable for the mic, needed only while installing the script on the mic (a couple of minutes, once).
-- The mic's line out is loud (2 Vrms). Set its volume knob under the lid low. The app trims the input gain
-  after each message and both adapters ended up in the right range on their own.
+- A 3.5 mm stereo cable, and a USB-C data cable for installing the mic's script.
+- Optional: keep the USB-C cable connected while you use the mic so the Mac's input stays closed between squeezes.
 
 ## Setup
 
-### 1. The Mac app
+**1. The Mac app**
 
-Requires macOS 26 (Apple's SpeechAnalyzer) and the Xcode command line tools. No Xcode project.
-
-```
-tools/make_signing_identity.sh        # once: a local self-signed identity so permission grants survive rebuilds
-tools/make_app.sh                     # builds, signs, installs ~/Applications/Squeeze.app
+```bash
+tools/make_signing_identity.sh   # once per Mac
+tools/make_app.sh                # build and install
 open ~/Applications/Squeeze.app
 ```
 
-On first launch grant Microphone when asked, then use the menu's "Grant Accessibility access…" (System Settings >
-Privacy & Security > Accessibility) so messages can go into Claude's composer. Option-click the icon for the plain menu:
-Start/Stop listening, Input device, Target, Shake to cancel, Menu bar activity badge, Launch at login, Quit. **Where a message goes:** to the conversation on screen in Claude when you squeeze,
-including while Claude is behind other apps. "Target" in the menu can instead **pin** one of your five most recent
-conversations: every squeeze then switches Claude to it first, until you pick "Conversation on screen" again. A pin
-works only while that conversation has a row in Claude's sidebar; if it can't be shown, the words stay as a draft in
-the conversation on screen. Switching conversations while talking also leaves the words unsent. Under "Input device" pick "External Microphone"
-for the headphone-jack adapter or "USB Advanced Audio Device" for the Sabrent; picking one starts listening on it.
-Right-click the icon to mute or unmute. The panel (click the icon) has the same choices under "Chats" and
-"Settings", and "Gestures" shows an animated drawing of what each handle and button action does.
+Allow the microphone when asked. Then click the menu bar icon and choose "Allow Accessibility access", so Squeeze
+can type into Claude. In the panel's Settings, pick your adapter under Input.
 
-The recognizer models for en-US and es-MX are installed on first use by the app (Apple system assets). Change the
-locales with `defaults write com.miguel.fxmic locales -array en-US es-MX`.
+**2. The mic**
 
-### 2. The mic
+Turn the mic on and connect its USB-C port. A drive called "FX MIC DISK" appears.
 
-Power the mic on, connect its USB-C port to the Mac; a drive called "FX MIC DISK" mounts and a serial console appears.
-
-```
-tools/build_fxmic_script.py --from-device     # reads TE's startup script from your mic and writes the patched copy
-tools/install_disk.sh install                 # boot stub as main.py; fxmic.py, config.json and the markers in claude/
+```bash
+pkill -x Squeeze                            # frees the mic's serial port
+tools/build_fxmic_script.py --from-device   # patch your mic's script
+tools/install_disk.sh install               # copy it to the mic's disk
 ```
 
-Eject the disk, unplug, power the mic off with the small button above the USB port, squeeze to start. Done: the
-script runs on every boot from now on. `tools/install_disk.sh remove` deletes `main.py` and `claude/` and the mic is
-stock again.
+Eject the disk, unplug, turn the mic off with the small button above the USB port, and squeeze to start it. The
+script now runs at every start. `tools/install_disk.sh remove` makes the mic stock again.
 
-**Switching modes on the mic.** Claude mode keeps its files in `claude/`, so the disk root stays factory. To switch
-between Claude mode and stock (factory effects and sounds, no marker beeps, for example to use the mic with a
-K.O. II): with the mic on and the handle released, hold the top (FX) button for 3 seconds for Claude mode, or the
-middle (sample) button for 3 seconds for stock. The sample LEDs sweep up three times for Claude or down three times for
-stock (also when it already was in that mode), and the mode is saved in `claude/mode`. Turn the mic off and on to
-start in that mode. The hold also steps the FX preset or sample once, like any press; that resets at the restart.
-TE's own script gives these buttons no long-press action, and its button combinations (sample + play for recovery,
-handle + double-click for the bootloader) only apply while powering on.
+**3. Claude**
 
-**Input closed between squeezes (USB cable).** The tones need the Mac's input open whenever Squeeze listens, so macOS
-shows the orange microphone dot the whole time. If the mic stays connected to the Mac with a USB-C data cable, its
-script also prints each event on its serial console ("fxmic press", "fxmic release", "fxmic queue", "fxmic draft",
-"fxmic cancel", "fxmic tap", and "fxmic hi" about every 2 s). While those lines arrive, Squeeze takes squeezes from
-there and keeps the input closed between them. The menu's "Mic open only while squeezing (USB cable)" turns this on
-or off, and the line under it says what is happening now: "closed between squeezes, over USB", "mic not on USB,
-listening for tones", or "listening for tones". With the cable in, the mic can also unmute Squeeze
-(after two taps on play, or 20 minutes without a squeeze): a squeeze unmutes and starts the message, a tap on play
-only unmutes. Without the cable, a muted Squeeze hears nothing, so unmute from the Mac (right-click the icon or the
-shortcut).
-It opens the input at the squeeze (in 70 to 180 ms here) and closes it at the release, for the level meter and,
-when wanted, Apple's recognizer. With Claude's dictation the mic is open for the squeeze anyway, and with "Apple's
-recognizer as fallback" off Squeeze only measures the level and transcribes nothing. On batteries, with a charge-only cable or with an older script, no lines arrive and Squeeze goes back
-to the tones within 5 s, mid-squeeze too. The tones still play either way. Squeeze only reads the port, never writes
-to it or touches its modem lines, and holds it exclusively: quit Squeeze before running `tools/mp_exec.py` or
-`build_fxmic_script.py --from-device`. The setting is `usbTrigger`.
+Open a conversation or a Code session in the Claude desktop app. Squeeze sends to the one on screen; pin another
+from the panel's Chats page. For Claude's dictation, turn on "Use Claude's dictation" in Settings.
 
-Do not use `mpremote` or any pyserial-based tool on the mic's serial port: opening the port with modem-line toggling
-resets the mic. `tools/mp_exec.py` runs code over the raw REPL without that.
+## Troubleshooting
 
-### 3. Claude
+- **Nothing happens when you squeeze.** Squeeze is muted (right-click the menu bar icon), the input device is wrong
+  (Settings), or the script is not on the mic.
+- **Speech arrives but squeezes don't.** Set Control Center > Mic Mode to Standard: Voice Isolation removes the
+  marker tones. Some cheap USB adapters cut everything above 7 kHz; see
+  [band-limited adapters](docs/reference.md#band-limited-or-quiet-adapters).
+- **"Mic signal weak".** The voice is too faint to trust, so the words stay as a draft. Replace the batteries and
+  reseat both plugs.
+- **No sound from the Mac after plugging in the jack adapter.** macOS moved output to the jack; pick your speakers in
+  System Settings > Sound > Output.
+- **The mic doesn't start after a bad script.** Hold the handle and double-click the small button above the USB
+  port, then drag `firmware/te/escape_blank_disk.uf2` onto the "FX MIC BOOT" drive.
 
-With Accessibility granted, spoken messages go to whatever Claude view is open, chat or Code session. Without it, run
-`/fxmic` in a Claude Code session to receive messages through the file inbox at `~/.fxmic/inbox/`; the skill is in
-`claude/skills/fxmic/SKILL.md`, copy it to `~/.claude/skills/fxmic/`.
+Logs are in `~/.fxmic/fxmic.log`. Never open the mic's serial port with `mpremote` or pyserial tools: they reset
+the mic. Use `tools/mp_exec.py`.
 
-**Claude's own dictation (optional, recommended for accuracy).** By default Squeeze transcribes with Apple's
-on-device recognizer. Turn on "Transcribe with Claude's dictation" in the menu (or
-`defaults write com.miguel.fxmic transcriptionEngine claude`) and a squeeze drives the Claude app's own dictation
-instead: Squeeze presses the mic control next to the composer ("Press and hold to record") through Accessibility,
-presses it again on release, and leaves the text where Claude wrote it, in the session it was spoken into: the middle
-(sample) button keeps it as a draft, a plain squeeze presses Send (while Claude is working that sends it as a mid-turn message; if
-Claude shows Stop instead of Send, it queues), the top (FX) button queues it in
-Claude with Cmd+Return. Like dictating by hand, the words are added after any draft already in the composer, and
-Send sends both. That is the same speech-to-text as clicking the mic in Claude, so the words come out
-the same. Apple's recognizer keeps running alongside as the fallback when dictation cannot start, and the log has
-one "compare: claude: … | apple …" line per message: word counts only, or both transcripts with
-`defaults write com.miguel.fxmic logTranscripts -bool true`. By default Squeeze writes nothing you say to its log
-(`~/.fxmic`, readable by you only) or to the system log. Turn the fallback off with the menu's "Apple's
-recognizer as fallback" (`appleFallback`); a squeeze whose dictation fails to start is then lost. The Claude window has to show a composer
-with the mic control. Claude starts listening 0.4 to 1 s after the squeeze: until then the bar is grey with a spinner
-and "Starting…", then it turns yellow with "Listening" and the name of the conversation the words go to. Wait for
-the yellow before talking. If Claude renames the control, list what is next to the composer with `touch ~/.fxmic/axdump`
-(written to the log) and set `defaults write com.miguel.fxmic dictationButtonLabels -array "<part of the label>"`.
+## More
 
-## Band-limited or quiet adapters
+- [docs/reference.md](docs/reference.md): settings, Claude's dictation in detail, USB reports, adapters, tools and
+  debug hooks.
+- [firmware/README.md](firmware/README.md): what goes on the mic, and recovery.
+- [CLAUDE.md](CLAUDE.md): the install runbook and hard-won rules, for Claude Code.
 
-The default markers sit at 12 to 18.5 kHz. Some cheap USB-C audio dongles sample their mic input at a low internal
-rate and pass nothing above about 7 kHz; one measured here ("AB13X USB Audio") was flat to 6 kHz, 20 dB down at
-7 kHz, and silent above. Squeezes then go unnoticed while speech still arrives. Check with
-`.build/release/fxmic-cal --device "<name>" --scan` while squeezing: no scan lines above 12 kHz means the tones are
-filtered out.
-
-- Use the low-pitch markers (3.4 to 5.7 kHz, regenerate with `tools/make_marker_pack_lowband.py`):
-  `tools/install_disk.sh install marker-pack-lowband`, then run the four `defaults write com.miguel.fxmic … -array …`
-  commands it prints so Squeeze listens for the same pitches, and restart Squeeze. `tools/install_disk.sh install` and
-  `defaults delete` on those keys go back to the originals.
-- If the input is quiet (the "quiet, turn the volume knob up" hint with the knob already at maximum), lower the
-  thresholds: `defaults write com.miguel.fxmic chirpMinLevelDb -float -85` for the markers and
-  `defaults write com.miguel.fxmic openDb -float -60` so speech still counts, then restart Squeeze. The log line
-  "tone threshold … speech threshold …" shows the values in use.
-- If quiet speech is often misheard, raise the level fed to the recognizer only:
-  `defaults write com.miguel.fxmic transcriberGainDb -float 20`. On recordings peaking at -36 to -43 dBFS, +20 dB raised
-  the confidence of weaker sentences from 0.75-0.79 to 0.87-0.88. The meter, speech gate and markers are unaffected.
-
-## Tools
-
-| tool | purpose |
-| --- | --- |
-| `fxmic-cal` (Swift, `swift build -c release`) | calibration: live levels, tone scan, gate and gesture events, utterance recordings, `--stt` transcription, `--file` offline replay, `--tones "press=17000,18500;release=14000,15000"` and `--min-level -60` to test other markers and thresholds |
-| `tools/mp_exec.py` | run Python on the mic over the raw REPL without resetting it |
-| `tools/build_fxmic_script.py` | patch TE's startup script with the marker and shake logic |
-| `tools/install_disk.sh` | install (optionally another marker pack) or remove the script and sounds on the mic's disk |
-| `tools/make_marker_pack_lowband.py` | marker tones at 3.4-5.7 kHz plus `pitches.json`, for adapters that cut everything above ~7 kHz |
-| `tools/make_marker_pack.py` | generate the four marker sounds and `config.json` |
-| `tools/romfs_deploy.py` | write a ROMFS image to the mic's read-only script partition (not needed for the disk route) |
-| `tools/make_escape_uf2.py` | build the recovery UF2 that blanks the disk |
-| `tools/probe_*.py`, `tools/serial_probe.py`, `tools/repl.py` | the probes used to learn the handle, accelerometer, and boot behavior |
-
-Debug hooks, set as environment variables when launching (`open --env NAME=value ~/Applications/Squeeze.app` keeps the
-app's own permissions): `FXMIC_RECORD=/path/live.wav` saves exactly what Squeeze hears until it mutes, to compare
-with `fxmic-cal` recording the same device; `FXMIC_REPLAY=/path/take.wav` feeds a recording through the live pipeline
-(markers, transcription, delivery) 3 s after it starts listening. The log has a "tone <name> level … snr …" line
-for every marker onset.
-
-Debug hook: `echo "hello" > ~/.fxmic/send.txt` delivers text as if spoken. Log at `~/.fxmic/fxmic.log`, state at
-`~/.fxmic/state.json`.
-
-## Troubleshooting and recovery
-
-- **"Mic signal weak"**: the voice arrived too faint to trust (dictation guesses words from a faint signal), so
-  nothing is sent or queued; any text stays as a draft. Replace the mic's batteries and reseat both plugs. The limit
-  is a peak of -26 dBFS; change it with `defaults write com.miguel.fxmic weakSignalDb -float -30` (-160 turns the
-  check off). Each squeeze's peak is logged ("level: voice peak …").
-- **Nothing happens when you squeeze**: the app is muted (right-click the icon), or the input device is wrong
-  (panel "Settings", or Option-click the icon, "Input device": "External Microphone" for the jack adapter, "USB Advanced Audio Device" for the
-  Sabrent), or the mic script is not installed (`tools/install_disk.sh install`).
-- **Speech arrives but squeezes are never detected (no "handle pressed" in the log)**: check Squeeze's Mic Mode.
-  While Squeeze is listening, open Control Center > Mic Mode and choose Standard. Voice Isolation keeps speech and
-  silences the marker tones a few milliseconds after they start, so nothing else looks wrong. macOS remembers the mode
-  per app; Squeeze logs "mic mode: …" and warns and opens the picker when Voice Isolation is active. Also check the
-  firmware (1.1.2 or later), and that your adapter passes the 12 to 18.5 kHz tones: run
-  `.build/release/fxmic-cal --device "<name>" --scan` while squeezing; no scan lines above 12 kHz means it filters them out.
-- **No sound from the Mac after plugging the jack adapter in**: macOS moved output to the jack. System Settings >
-  Sound > Output > MacBook Pro Speakers. Switching output while listening knocks the audio engine off the
-  jack input; the app notices within a second and rebinds it (log lines "engine drifted" and "reconnected"). Unplugging the adapter or the mic while
-  listening mutes; unmute again after plugging back in.
-- **Messages arrive as system notes instead of your bubbles**: Accessibility is not granted, or the Claude window is
-  closed. Check `~/.fxmic/fxmic.log` for "composer delivery failed".
-- **False cancels or shakes not registering**: the shake rule needs three alternating swings of about 0.3 g within 550 ms, and it can be switched off in the panel's Settings. Tune
-  `SHAKE_DEV`, `SHAKE_EXCURSIONS`, `SHAKE_WINDOW` in `tools/build_fxmic_script.py` and reinstall.
-- **The mic does not start after a bad script**: hold the handle and double-click the small button above the USB port,
-  drag `firmware/te/escape_blank_disk.uf2` onto the "FX MIC BOOT" drive. The disk is reformatted at the next start
-  and the mic runs its built-in startup. TE's firmware is at https://teenage.engineering/downloads/ep-2350 if you need
-  a full reflash; it does not touch the disk region.
-
-## Repository layout
-
-```
-Sources/FXMicCore   audio device tap, speech gate, Goertzel tone detection, live dual-locale transcriber, WAV writer
-Sources/FXMic       the menu bar app: controller, island and panel, status menu, composer delivery, dispatcher, hotkey, settings
-Sources/fxmic-cal   calibration command line tool
-firmware/           boot stub, patched-script builder inputs, recovery UF2, notes
-packs/              generated sample packs (marker-pack is the one in use)
-tools/              scripts listed above
-claude/             the /fxmic skill for Claude Code
-PLAN.md             engineering log
-```
-
-## License
-
-MIT for everything in this repository. The EP-2350 firmware, its startup script, and its documentation belong to
-Teenage Engineering and are not included; the build tool reads the script from your own device.
+A fork of [migueldelag/fx-mic-claude](https://github.com/migueldelag/fx-mic-claude). MIT for everything here; the
+EP-2350 firmware, its startup script and its documentation belong to Teenage Engineering, and the build tool reads
+the script from your own device.

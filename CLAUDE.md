@@ -20,9 +20,9 @@ Tell the user what you are doing at each step; steps marked HUMAN need their han
    tools/make_app.sh                   # builds, signs, installs ~/Applications/Squeeze.app
    open ~/Applications/Squeeze.app
    ```
-3. HUMAN, in this order: allow Microphone when macOS asks; right-click the handset in the menu bar and choose
-   "Grant Accessibility access…", then enable Squeeze in System Settings > Privacy & Security > Accessibility; in the
-   same menu pick the right "Input device" and turn on "Launch at login". If the headphone-jack adapter is used,
+3. HUMAN, in this order: allow Microphone when macOS asks; click the mic in the menu bar and choose "Allow
+   Accessibility access", then enable Squeeze in System Settings > Privacy & Security > Accessibility; in the panel's
+   Settings pick the adapter under "Input" and turn on "Open at login". If the headphone-jack adapter is used,
    macOS moves sound output to the jack: HUMAN reselects the speakers under System Settings > Sound > Output.
 4. Verify the Mac side without the mic: `echo "hello from fxmic" > ~/.fxmic/send.txt`. Within two seconds the text
    must appear as a sent message in the Claude window. If it lands nowhere, read `~/.fxmic/fxmic.log`.
