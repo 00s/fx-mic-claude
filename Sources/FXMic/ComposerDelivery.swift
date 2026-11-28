@@ -37,17 +37,51 @@ enum ComposerDelivery {
         AXUIElementSetAttributeValue(axApp, "AXManualAccessibility" as CFString, kCFBooleanTrue)
     }
 
+    /// Header buttons that name the conversation on screen: "<title>, rename session" in Code sessions; other views
+    /// (a project's thread, a chat) may say thread, chat, conversation or task.
+    static let renameSuffixes = [", rename session", ", rename thread", ", rename chat", ", rename conversation", ", rename task"]
+
     /// Title of the session shown in the window, read from its "…, rename session" header button.
     static func activeSessionTitle(in window: AXUIElement) -> String? {
-        let suffix = ", rename session"
-        return find(window, depth: 0) { role($0) == "AXButton" && string($0, kAXDescriptionAttribute).hasSuffix(suffix) }
-            .first.map { String(string($0, kAXDescriptionAttribute).dropLast(suffix.count)) }
+        for el in find(window, depth: 0, { role($0) == "AXButton" }) {
+            let d = string(el, kAXDescriptionAttribute)
+            if let suffix = renameSuffixes.first(where: { d.hasSuffix($0) }) { return String(d.dropLast(suffix.count)) }
+        }
+        return nil
+    }
+
+    /// The window's composers, best match first. Code sessions describe it "Prompt"; other views (a project's thread,
+    /// a plain chat) describe it otherwise, so there any editable text area with Send or Claude's dictation button
+    /// beside it counts. A search field never does.
+    static func composers(in window: AXUIElement) -> [AXUIElement] {
+        let texts = find(window, depth: 0) { ["AXTextArea", "AXTextField"].contains(role($0)) }
+        let prompt = texts.filter { role($0) == "AXTextArea" && string($0, kAXDescriptionAttribute) == "Prompt" }
+        if !prompt.isEmpty { return prompt }
+        let editable = texts.filter { el in
+            let label = (string(el, kAXDescriptionAttribute) + " " + string(el, kAXTitleAttribute)).lowercased()
+            return string(el, kAXSubroleAttribute) != "AXSearchField" && !label.contains("search") && !label.contains("rename")
+                && frame(el).width > 0
+        }
+        guard !editable.isEmpty else { return [] }
+        let markers = Settings.shared.dictationButtonLabels.map { $0.lowercased() }
+        let beside = find(window, depth: 0) { el in
+            guard role(el) == "AXButton" else { return false }
+            let d = string(el, kAXDescriptionAttribute), t = string(el, kAXTitleAttribute)
+            if d == "Send" || t == "Send" { return true }
+            let l = (d + " " + t + " " + string(el, kAXHelpAttribute)).lowercased()
+            return markers.contains { l.contains($0) }
+        }.map(frame)
+        return editable.filter { el in
+            let tf = frame(el)
+            return beside.contains { $0.maxY >= tf.minY - 60 && $0.minY <= tf.maxY + 80 }
+        }
     }
 
     /// Title of the conversation on screen right now, or nil when it has none FXMic can read (a Project, a new chat).
     static func onScreenTitle() -> String? {
         guard isTrusted, let app = ClaudeApp.running else { return nil }
         let axApp = AXUIElementCreateApplication(app.processIdentifier)
+        AXUIElementSetAttributeValue(axApp, "AXManualAccessibility" as CFString, kCFBooleanTrue)
         guard let found = locateComposer(axApp, attempts: 1) else { return nil }
         return activeSessionTitle(in: found.window)
     }
@@ -167,8 +201,8 @@ enum ComposerDelivery {
         for attempt in 0..<attempts {
             let windows = (attribute(axApp, kAXWindowsAttribute) as? [AXUIElement]) ?? []
             if let main = (attribute(axApp, kAXMainWindowAttribute) as! AXUIElement?) ?? windows.first,
-               case let composers = find(main, depth: 0, { role($0) == "AXTextArea" && string($0, kAXDescriptionAttribute) == "Prompt" }),
-               let composer = composers.first(where: { (attribute($0, kAXFocusedAttribute) as? Bool) == true }) ?? composers.first {
+               case let found = composers(in: main),
+               let composer = found.first(where: { (attribute($0, kAXFocusedAttribute) as? Bool) == true }) ?? found.first {
                 return (main, composer)
             }
             if attempt < attempts - 1 { Thread.sleep(forTimeInterval: 0.25) }

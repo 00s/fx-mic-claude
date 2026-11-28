@@ -403,7 +403,7 @@ final class ClaudeDictation {
             guard AX.isTrusted, let app = ClaudeApp.running else { Log.write("axdump: no access or Claude not running"); return }
             let axApp = AXUIElementCreateApplication(app.processIdentifier)
             AXUIElementSetAttributeValue(axApp, "AXManualAccessibility" as CFString, kCFBooleanTrue)
-            guard let found = ComposerDelivery.locateComposer(axApp) else { Log.write("axdump: composer not found"); return }
+            guard let found = ComposerDelivery.locateComposer(axApp) else { logTextAreas(axApp); return }
             logButtons(window: found.window, composer: found.composer, why: "requested")
             // Read-only: which conversations a pin could reach (a pin works only through a sidebar row).
             let rows = SessionStore.recent(limit: 8).map { s in
@@ -414,7 +414,7 @@ final class ClaudeDictation {
     }
 
     private func logButtons(window: AXUIElement, composer: AXUIElement, why: String) {
-        let composers = AX.find(window, depth: 0) { AX.role($0) == "AXTextArea" && AX.string($0, kAXDescriptionAttribute) == "Prompt" }
+        let composers = AX.composers(in: window)
         var out = "dictation: controls near the composer (\(why)); \(composers.count) composer(s) in the window, using the first"
         for (i, c) in composers.enumerated() {
             let cf = AX.frame(c)
@@ -429,6 +429,30 @@ final class ClaudeDictation {
                 let f = AX.frame(el)
                 out += String(format: "\n   %@ \"%@\" at %.0f,%.0f %.0fx%.0f", self.kind(el), self.label(el), f.minX, f.minY, f.width, f.height)
             }
+        }
+        Log.write(out)
+    }
+
+    /// No composer found: log what the window does have (text areas, labelled buttons, its windows), so a new kind
+    /// of Claude view can be taught from one dump. Labels only, never text values.
+    private func logTextAreas(_ axApp: AXUIElement) {
+        let windows = (AX.attribute(axApp, kAXWindowsAttribute) as? [AXUIElement]) ?? []
+        let main = (AX.attribute(axApp, kAXMainWindowAttribute) as! AXUIElement?) ?? windows.first
+        var out = "axdump: composer not found; \(windows.count) window(s): "
+            + windows.map { "\"\(AX.string($0, kAXTitleAttribute))\"" }.joined(separator: ", ")
+        guard let main else { Log.write(out + "; no main window"); return }
+        out += "; main \"\(AX.string(main, kAXTitleAttribute))\""
+        for el in AX.find(main, depth: 0, { ["AXTextArea", "AXTextField"].contains(AX.role($0)) }) {
+            let f = AX.frame(el)
+            out += String(format: "\n  %@ \"%@\" at %.0f,%.0f %.0fx%.0f%@", kind(el), label(el), f.minX, f.minY, f.width, f.height,
+                          (AX.attribute(el, kAXFocusedAttribute) as? Bool) == true ? " (focused)" : "")
+        }
+        for el in AX.find(main, depth: 0, { AX.role($0) == "AXButton" }) {
+            let d = AX.string(el, kAXDescriptionAttribute), t = AX.string(el, kAXTitleAttribute)
+            guard !(d + t).isEmpty else { continue }
+            let f = AX.frame(el)
+            out += String(format: "\n  AXButton \"%@\" at %.0f,%.0f %.0fx%.0f", [d, t].filter { !$0.isEmpty }.joined(separator: " | "),
+                          f.minX, f.minY, f.width, f.height)
         }
         Log.write(out)
     }
