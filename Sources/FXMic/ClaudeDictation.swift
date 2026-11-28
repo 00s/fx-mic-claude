@@ -36,6 +36,8 @@ final class ClaudeDictation {
         let buttonCenter: CGPoint
         let idleLabel: String
         var labelChanged = false
+        /// This view shows "Finish dictation" while listening, in place of the dictation button itself.
+        var hasFinish = false
         /// Claude was seen opening the microphone (its label did not update: window out of view).
         var micSeen = false
         /// The draft that was in the composer before the squeeze can no longer be found in it (edited, or reformatted
@@ -106,7 +108,10 @@ final class ClaudeDictation {
                 Log.write("dictation: could not show the pinned conversation (\(error)), dictating on screen as a draft")
             }
         }
-        guard let found = ComposerDelivery.locateComposer(axApp) else { return .failure(.noComposer) }
+        guard let found = ComposerDelivery.locateComposer(axApp) else {
+            logTextAreas(axApp)                // what this view does have, so it can be taught without another try
+            return .failure(.noComposer)
+        }
         let window = found.window, composer = found.composer
 
         let labels = Settings.shared.dictationButtonLabels.map { $0.lowercased() }
@@ -178,7 +183,7 @@ final class ClaudeDictation {
         for _ in 0..<20 {
             Thread.sleep(forTimeInterval: 0.1)
             nowLabel = buttonLabel(current) ?? idleLabel
-            if finishButton(near: composer, in: window) != nil { nowLabel = "Finish dictation"; current.labelChanged = true; break }
+            if finishButton(near: composer, in: window) != nil { nowLabel = "Finish dictation"; current.labelChanged = true; current.hasFinish = true; break }
             if nowLabel != idleLabel { current.labelChanged = true; break }
             if ClaudeApp.isUsingMic() { current.micSeen = true; break }
         }
@@ -280,7 +285,9 @@ final class ClaudeDictation {
             Thread.sleep(forTimeInterval: 0.15)
             let text = dictated(value(&r), before: r.before)
             if text != last { last = text; lastChange = Date() }
-            let idle = r.micSeen ? !ClaudeApp.isUsingMic() : (!r.labelChanged || buttonLabel(r) == r.idleLabel)
+            // Where Finish replaces the button, the button doesn't come back to the same spot: done is Finish gone.
+            let idle = r.hasFinish ? finishButton(near: r.composer, in: r.window) == nil && !ClaudeApp.isUsingMic()
+                : r.micSeen ? !ClaudeApp.isUsingMic() : (!r.labelChanged || buttonLabel(r) == r.idleLabel)
             let still = Date().timeIntervalSince(lastChange)
             if idle, still >= settle, !last.isEmpty || Date().timeIntervalSince(pressedAt) > emptyWait { break }
             if !idle, still >= 3, !last.isEmpty { Log.write("dictation: button still busy, text settled"); break }
@@ -464,7 +471,10 @@ final class ClaudeDictation {
         out += "; main \"\(AX.string(main, kAXTitleAttribute))\""
         for el in AX.find(main, depth: 0, { ["AXTextArea", "AXTextField"].contains(AX.role($0)) }) {
             let f = AX.frame(el)
-            out += String(format: "\n  %@ \"%@\" at %.0f,%.0f %.0fx%.0f%@", kind(el), label(el), f.minX, f.minY, f.width, f.height,
+            var writable = DarwinBoolean(false)
+            AXUIElementIsAttributeSettable(el, kAXValueAttribute as CFString, &writable)
+            out += String(format: "\n  %@ \"%@\" at %.0f,%.0f %.0fx%.0f%@%@", kind(el), label(el), f.minX, f.minY, f.width, f.height,
+                          writable.boolValue ? " (writable)" : " (not writable)",
                           (AX.attribute(el, kAXFocusedAttribute) as? Bool) == true ? " (focused)" : "")
         }
         for el in AX.find(main, depth: 0, { AX.role($0) == "AXButton" }) {
@@ -495,10 +505,11 @@ final class ClaudeDictation {
 
     private func buttonsNear(_ composer: AXUIElement, in window: AXUIElement) -> [AXUIElement] {
         let cf = AX.frame(composer)
+        let panes = AX.composers(in: window).map(AX.frame)
         return AX.find(window, depth: 0) { el in
             guard Self.pressable.contains(AX.role(el)) else { return false }
             let f = AX.frame(el)
-            return f.width > 0 && f.maxY >= cf.minY - 60 && f.minY <= cf.maxY + 80
+            return f.width > 0 && f.maxY >= cf.minY - 60 && f.minY <= cf.maxY + 80 && AX.belongs(f, to: cf, among: panes)
         }
     }
 
