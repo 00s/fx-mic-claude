@@ -19,7 +19,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <plist version="1.0"><dict>
   <key>CFBundleIdentifier</key><string>com.miguel.fxmic</string>
   <key>CFBundleName</key><string>FXMic</string>
-  <key>CFBundleDisplayName</key><string>FXMic</string>
+  <key>CFBundleDisplayName</key><string>Squeeze</string>
   <key>CFBundleExecutable</key><string>FXMic</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>0.1</string>
@@ -27,7 +27,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>LSMinimumSystemVersion</key><string>26.0</string>
   <key>LSUIElement</key><true/>
   <key>ATSApplicationFontsPath</key><string>Fonts</string>
-  <key>NSMicrophoneUsageDescription</key><string>FXMic listens to the EP-2350 through the Sabrent input and transcribes on-device.</string>
+  <key>NSMicrophoneUsageDescription</key><string>Squeeze listens to the EP-2350 through the Sabrent input and transcribes on-device.</string>
   <key>NSSpeechRecognitionUsageDescription</key><string>On-device transcription of what you say into the mic.</string>
   <key>NSHighResolutionCapable</key><true/>
 </dict></plist>
