@@ -43,9 +43,9 @@ enum ComposerDelivery {
 
     /// Title of the session shown in the window, read from its "…, rename session" header button.
     static func activeSessionTitle(in window: AXUIElement) -> String? {
-        for el in find(window, depth: 0, { role($0) == "AXButton" }) {
-            let d = string(el, kAXDescriptionAttribute)
-            if let suffix = renameSuffixes.first(where: { d.hasSuffix($0) }) { return String(d.dropLast(suffix.count)) }
+        let names = find(window, depth: 0) { role($0) == "AXButton" }.map { string($0, kAXDescriptionAttribute) }
+        for suffix in renameSuffixes {
+            if let d = names.first(where: { $0.hasSuffix(suffix) }) { return String(d.dropLast(suffix.count)) }
         }
         return nil
     }
@@ -71,10 +71,23 @@ enum ComposerDelivery {
             let l = (d + " " + t + " " + string(el, kAXHelpAttribute)).lowercased()
             return markers.contains { l.contains($0) }
         }.map(frame)
+        // Beside it in both directions, so a field in another pane at the same height doesn't count.
         return editable.filter { el in
             let tf = frame(el)
-            return beside.contains { $0.maxY >= tf.minY - 60 && $0.minY <= tf.maxY + 80 }
+            return beside.contains {
+                $0.maxY >= tf.minY - 60 && $0.minY <= tf.maxY + 80 && $0.midX >= tf.minX - 80 && $0.midX <= tf.maxX + 80
+            }
         }
+    }
+
+    /// Whether a control sits with this composer rather than another's. Two conversations side by side each have their
+    /// own mic and Send at the same height, so with several composers a button counts only for the nearest one
+    /// sideways. With one composer every button counts, as before.
+    static func belongs(_ button: CGRect, to composer: CGRect, among all: [CGRect]) -> Bool {
+        guard all.count > 1 else { return true }
+        func gap(_ c: CGRect) -> CGFloat { max(c.minX - button.midX, button.midX - c.maxX, 0) }
+        let own = gap(composer)
+        return own <= 120 && all.allSatisfy { own <= gap($0) }
     }
 
     /// Title of the conversation on screen right now, or nil when it has none FXMic can read (a Project, a new chat).
@@ -179,12 +192,13 @@ enum ComposerDelivery {
         guard value.hasPrefix(text.prefix(40)) else { throw Failure.valueNotSet }
 
         let cf = frame(composer)
+        let panes = composers(in: window).map(frame)
         var sendButton: AXUIElement?
         for _ in 0..<8 {
             sendButton = find(window, depth: 0) { el in
                 guard role(el) == "AXButton", string(el, kAXDescriptionAttribute) == "Send" else { return false }
                 let f = frame(el)
-                return f.minY >= cf.minY - 10 && f.minY <= cf.maxY + 80
+                return f.minY >= cf.minY - 10 && f.minY <= cf.maxY + 80 && belongs(f, to: cf, among: panes)
             }.first
             if sendButton != nil { break }
             Thread.sleep(forTimeInterval: 0.1)
