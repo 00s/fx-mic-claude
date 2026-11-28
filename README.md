@@ -33,8 +33,10 @@ Muting is for the audio cable, where listening means the input stays open. With 
 closed between squeezes, so there is no mute button, a double tap does nothing, and a squeeze always works.
 
 English and Spanish are both recognized, chosen per message. The app mutes itself after 20 minutes without a
-squeeze, which is when the mic turns itself off too. A small toast slides down from the top of the screen while you squeeze, showing "Listening", a level
-meter and the live transcript, all of it, growing downward as you talk. It switches to "Sending…" when you release and
+squeeze, which is when the mic turns itself off too. A small island slides down from the top of the screen while you squeeze: "Listening", with color that
+flows with your voice, the conversation the words go to, the live transcript, all of it, growing downward as you talk
+(a message too long for the screen scrolls, following the end), and what the release can do. With the panel open, the
+panel shows the same thing instead. It switches to "Sending…" when you release and
 "Sent" with the final text when it lands, then slides away; it never takes focus.
 The live text comes from a second, faster recognizer: first words about 1 s after you start talking, then about once a
 second. The sent text still comes from the accurate recognizer. Settings (`defaults write com.miguel.fxmic …`, then
@@ -42,9 +44,9 @@ restart FXMic): `hudTranscript -bool false` hides the text, `livePreview -bool f
 text then arrives in bursts a few seconds late), `fastLiveText -bool true` makes every recognizer fast, the sent text
 included, at some cost in accuracy.
 
-Queue and draft show in the toast as soon as the button is pressed ("Listening · Queue" with an orange clock,
+Queue and draft show in the island as soon as the button is pressed ("Listening · Queue" with an orange clock,
 "Listening · Draft" with a blue pencil). Pressing the other button later in the same squeeze switches; the last one
-pressed wins. On release the toast reads "Queueing…" or "Adding to draft…" instead of "Sending…". A queued message
+pressed wins. On release the island reads "Queueing…" or "Adding to draft…" instead of "Sending…". A queued message
 goes out as soon as the session is idle, so it is sent right away when Claude is not working. Queued messages go one
 at a time, at least 10 s apart; one still waiting after 30 minutes is left in the composer as a draft. Whether a session
 is working is read from the desktop app's own session files (`latestUserFrameAt` newer than `lastTurnEdgeAt`), an
@@ -112,7 +114,8 @@ conversations: every squeeze then switches Claude to it first, until you pick "C
 works only while that conversation has a row in Claude's sidebar; if it can't be shown, the words stay as a draft in
 the conversation on screen. Switching conversations while talking also leaves the words unsent. Under "Input device" pick "External Microphone"
 for the headphone-jack adapter or "USB Advanced Audio Device" for the Sabrent; picking one starts listening on it.
-Right-click the icon to mute or unmute.
+Right-click the icon to mute or unmute. The panel (click the icon) has the same choices under "Chats" and
+"Settings", and "Gestures" shows an animated drawing of what each handle and button action does.
 
 The recognizer models for en-US and es-MX are installed on first use by the app (Apple system assets). Change the
 locales with `defaults write com.miguel.fxmic locales -array en-US es-MX`.
@@ -230,7 +233,7 @@ Debug hook: `echo "hello" > ~/.fxmic/send.txt` delivers text as if spoken. Log a
 ## Troubleshooting and recovery
 
 - **Nothing happens when you squeeze**: the app is muted (right-click the icon), or the input device is wrong
-  (right-click, "Input device": "External Microphone" for the jack adapter, "USB Advanced Audio Device" for the
+  (panel "Settings", or Option-click the icon, "Input device": "External Microphone" for the jack adapter, "USB Advanced Audio Device" for the
   Sabrent), or the mic script is not installed (`tools/install_disk.sh install`).
 - **Speech arrives but squeezes are never detected (no "handle pressed" in the log)**: check FXMic's Mic Mode.
   While FXMic is listening, open Control Center > Mic Mode and choose Standard. Voice Isolation keeps speech and
@@ -244,7 +247,7 @@ Debug hook: `echo "hello" > ~/.fxmic/send.txt` delivers text as if spoken. Log a
   listening mutes; unmute again after plugging back in.
 - **Messages arrive as system notes instead of your bubbles**: Accessibility is not granted, or the Claude window is
   closed. Check `~/.fxmic/fxmic.log` for "composer delivery failed".
-- **False cancels or shakes not registering**: the shake rule needs three alternating swings of about 0.4 g within 550 ms, and it can be switched off in the menu. Tune
+- **False cancels or shakes not registering**: the shake rule needs three alternating swings of about 0.3 g within 550 ms, and it can be switched off in the panel's Settings. Tune
   `SHAKE_DEV`, `SHAKE_EXCURSIONS`, `SHAKE_WINDOW` in `tools/build_fxmic_script.py` and reinstall.
 - **The mic does not start after a bad script**: hold the handle and double-click the small button above the USB port,
   drag `firmware/te/escape_blank_disk.uf2` onto the "FX MIC BOOT" drive. The disk is reformatted at the next start
@@ -255,7 +258,7 @@ Debug hook: `echo "hello" > ~/.fxmic/send.txt` delivers text as if spoken. Log a
 
 ```
 Sources/FXMicCore   audio device tap, speech gate, Goertzel tone detection, live dual-locale transcriber, WAV writer
-Sources/FXMic       the menu bar app: controller, HUD, status menu, composer delivery, dispatcher, hotkey, settings
+Sources/FXMic       the menu bar app: controller, island and panel, status menu, composer delivery, dispatcher, hotkey, settings
 Sources/fxmic-cal   calibration command line tool
 firmware/           boot stub, patched-script builder inputs, recovery UF2, notes
 packs/              generated sample packs (marker-pack is the one in use)

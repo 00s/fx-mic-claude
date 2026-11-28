@@ -29,16 +29,26 @@ struct IslandStack<Action: View>: View {
     var idle: (title: String, icon: String, live: Bool)? = nil
     /// Off where the conversation is already named right below (the panel's "Send to" list).
     var showsDestination = true
-    /// Off where the same actions are already on screen (the panel's gestures page).
-    var showsModes = true
     /// Between messages: where the next one will go, so the card is there with it. Only the panel sets this.
     var idleDestination: String? = nil
     /// Back from a pinned conversation to the one on screen. Only the panel can offer it.
     var onUnpin: (() -> Void)? = nil
+    /// Off where the pinned list is right there: one pin per conversation on screen is enough.
+    var showsPin = true
+    /// Placed under the words (the panel's page buttons): the words always read above the controls.
+    var fixed: AnyView? = nil
+    /// The panel's gestures page keeps the squeeze rail on screen all the time; between squeezes a tap picks which gesture the drawing plays.
+    var railAlways = false
+    var demoPick: Int? = nil
+    var onPick: ((Int) -> Void)? = nil
     @ViewBuilder var action: Action
-    @Namespace private var highlight
 
     static var width: CGFloat { 420 }
+    /// Room for about two lines from the start of a squeeze, so the first words don't push anything.
+    static var wordsMinHeight: CGFloat { 56 }
+    /// The words grow to show the whole message; only one too long for the screen scrolls, following the end.
+    static var wordsMaxHeight: CGFloat { max(160, (NSScreen.main?.visibleFrame.height ?? 800) - 390) }
+    @State private var wordsMeasured: CGFloat = 0
 
     /// The modes show for the whole squeeze, dimmed until Claude listens, so the card keeps one shape.
     private var squeezing: Bool { idle == nil && (model.title == "Listening" || model.title == "Starting…") }
@@ -63,7 +73,8 @@ struct IslandStack<Action: View>: View {
             if hasDestination || (idle == nil && !model.body.isEmpty) {
                 transcript(ink).transition(.opacity)
             }
-            if squeezing && showsModes {
+            if let fixed { fixed }
+            if squeezing || railAlways {
                 modes(ink).transition(.opacity)
             }
         }
@@ -128,6 +139,15 @@ struct IslandStack<Action: View>: View {
         }
     }
 
+    /// The whole message, never cut. A few words are set large; the type steps down as there is more to fit.
+    private var words: some View {
+        Text(model.body).font(.ui(wordSize, .regular)).lineSpacing(wordSize * 0.28)
+            .contentTransition(.identity)          // new words appear in place, no crossfade
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { wordsMeasured = $0 }
+    }
+
     private func transcript(_ ink: Ink) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             if hasDestination {
@@ -136,7 +156,7 @@ struct IslandStack<Action: View>: View {
                     Text("Send to")
                     Text(destination).foregroundStyle(ink.primary).lineLimit(1).truncationMode(.tail)
                     Spacer(minLength: 4)
-                    if Settings.shared.targetSessionTitle != nil {
+                    if showsPin && Settings.shared.targetSessionTitle != nil {
                         // One control says both things: it's pinned (the pin) and a click unpins (on hover).
                         if let onUnpin {
                             UnpinButton(ink: ink, action: onUnpin)
@@ -147,12 +167,12 @@ struct IslandStack<Action: View>: View {
                 }
                 .font(.ui(14, .medium)).foregroundStyle(ink.secondary)
             }
-            if idle == nil && !model.body.isEmpty {
-                // A few words are set large; the type steps down as there is more to fit.
-                Text(model.body).font(.ui(wordSize, .regular)).lineSpacing(wordSize * 0.28)
-                    .lineLimit(8).truncationMode(.head)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .contentTransition(.identity)          // new words appear in place, no crossfade
+            if idle == nil && (squeezing || !model.body.isEmpty) {
+                if wordsMeasured > Self.wordsMaxHeight {
+                    ScrollView { words }.frame(height: Self.wordsMaxHeight).defaultScrollAnchor(.bottom)
+                } else {
+                    words.frame(minHeight: Self.wordsMinHeight, alignment: .top)
+                }
             }
         }
         .padding(.horizontal, 22).padding(.vertical, 18)
@@ -163,68 +183,20 @@ struct IslandStack<Action: View>: View {
     /// What this squeeze can become, drawn where to do it: let go to send, top button to queue, middle to draft,
     /// shake to cancel. Always the same four in the same places; only the highlight slides.
     private func modes(_ ink: Ink) -> some View {
-        let chosen = model.intent == "Queue" ? 1 : model.intent == "Draft" ? 2 : 0
+        let intent = model.intent == "Queue" ? 1 : model.intent == "Draft" ? 2 : 0
+        let chosen: Int? = squeezing ? intent : demoPick
         // Each keeps its words: what to do, and what it gets you. Only the highlight moves. Once queue or draft is
         // chosen, letting go no longer sends, so that one fades.
-        let count = Settings.shared.shakeToCancel ? 4 : 3
-        return HStack(spacing: 0) {
-            mode("Release\nto send", chosen == 0, ink) {
-                MovingGlyph(kind: .release, line: ink.secondary)
-            }
-            .opacity(chosen == 0 ? 1 : 0.4)
-            mode("Top to\nqueue", chosen == 1, ink) {
-                MicButtonGlyph(pressed: 0, line: ink.secondary)
-            }
-            mode("Middle\nto draft", chosen == 2, ink) {
-                MicButtonGlyph(pressed: 1, line: ink.secondary)
-            }
-            if Settings.shared.shakeToCancel {
-                mode("Shake to\ncancel", false, ink) { MovingGlyph(kind: .shake, line: ink.secondary) }
-            }
+        var items = [
+            RailItem("Release\nto send", dim: squeezing && intent != 0) { MovingGlyph(kind: .release, line: ink.secondary) },
+            RailItem("Top to\nqueue") { MicButtonGlyph(pressed: 0, line: ink.secondary) },
+            RailItem("Middle\nto draft") { MicButtonGlyph(pressed: 1, line: ink.secondary) },
+        ]
+        if Settings.shared.shakeToCancel {
+            items.append(RailItem("Shake to\ncancel") { MovingGlyph(kind: .shake, line: ink.secondary) })
         }
-        .background {
-            // The selection is one clear drop with a light edge under the chosen action. It travels, stretching as it
-            // sets off and settling with a little give. Drawn, not a glass layer: glass draws over the content here.
-            GeometryReader { geo in
-                let width = geo.size.width / CGFloat(count)
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .fill(LinearGradient(colors: [ink.primary.opacity(0.20), ink.primary.opacity(0.09)],
-                                         startPoint: .top, endPoint: .bottom))
-                    .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(
-                        LinearGradient(colors: [.white.opacity(0.65), .white.opacity(0.08), ink.primary.opacity(0.22)],
-                                       startPoint: .top, endPoint: .bottom),
-                        lineWidth: 1))
-                    .keyframeAnimator(initialValue: CGSize(width: 1, height: 1), trigger: chosen) { drop, scale in
-                        drop.scaleEffect(x: scale.width, y: scale.height)
-                    } keyframes: { _ in
-                        SpringKeyframe(CGSize(width: 1.22, height: 0.92), duration: 0.17)
-                        SpringKeyframe(CGSize(width: 0.95, height: 1.03), duration: 0.18)
-                        SpringKeyframe(CGSize(width: 1, height: 1), duration: 0.24)
-                    }
-                    .frame(width: width, height: geo.size.height)
-                    .offset(x: width * CGFloat(chosen))
-            }
-        }
-        .padding(6)
-        // The track is frost.
-        .background(ink.dense, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous).strokeBorder(ink.primary.opacity(0.10), lineWidth: 1))
-        .opacity(model.title == "Starting…" ? 0.45 : 1)
-        .animation(.spring(response: 0.42, dampingFraction: 0.68), value: chosen)
-    }
-
-    private func mode(_ label: String, _ on: Bool, _ ink: Ink, @ViewBuilder glyph: () -> some View) -> some View {
-        VStack(spacing: 5) {
-            glyph().frame(width: 34, height: 34)
-            Text(label)
-                .font(.ui(14, on ? .semibold : .medium)).foregroundStyle(ink.primary)
-                .multilineTextAlignment(.center).lineLimit(2, reservesSpace: true).minimumScaleFactor(0.85)
-        }
-        .frame(maxWidth: .infinity).padding(.vertical, 10)
-        .scaleEffect(on ? 1.05 : 1)
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(on ? .isSelected : [])
+        return ActionRail(items: items, selected: chosen, onPick: squeezing ? nil : onPick)
+            .opacity(model.title == "Starting…" ? 0.45 : 1)
     }
 
     /// The state colors, dark enough to read on light glass.
@@ -238,6 +210,77 @@ extension View {
     /// The island's one material: Liquid Glass over a frost, so what's behind stays soft and text stays readable.
     func frosted(_ shape: some Shape, tint: Color) -> some View {
         glassEffect(.regular.tint(tint).interactive(), in: shape).background(.ultraThinMaterial, in: shape)
+    }
+}
+
+struct RailItem {
+    let label: String
+    var dim = false
+    let glyph: AnyView
+    init(_ label: String, dim: Bool = false, @ViewBuilder glyph: () -> some View) {
+        self.label = label
+        self.dim = dim
+        self.glyph = AnyView(glyph())
+    }
+}
+
+/// The one rail: pictures over words on a frosted track, with a clear drop that travels to the chosen one.
+struct ActionRail: View {
+    @Environment(\.colorScheme) var scheme
+    let items: [RailItem]
+    let selected: Int?
+    var onPick: ((Int) -> Void)? = nil
+
+    var body: some View {
+        let ink = Ink.of(scheme)
+        HStack(spacing: 0) {
+            ForEach(items.indices, id: \.self) { i in
+                let on = selected == i
+                VStack(spacing: 5) {
+                    items[i].glyph.frame(width: 34, height: 34)
+                    Text(items[i].label)
+                        .font(.ui(14, on ? .semibold : .medium)).foregroundStyle(ink.primary)
+                        .multilineTextAlignment(.center).lineLimit(2, reservesSpace: true).minimumScaleFactor(0.85)
+                }
+                .frame(maxWidth: .infinity).padding(.vertical, 10)
+                .scaleEffect(on ? 1.05 : 1)
+                .opacity(items[i].dim ? 0.4 : 1)
+                .contentShape(Rectangle())
+                .onTapGesture { onPick?(i) }
+                .accessibilityElement(children: .combine)
+                .accessibilityAddTraits(on ? [.isSelected, .isButton] : .isButton)
+            }
+        }
+        .background {
+            // The selection is one clear drop with a light edge under the chosen action. It travels, stretching as it
+            // sets off and settling with a little give. Drawn, not a glass layer: glass draws over the content here.
+            GeometryReader { geo in
+                let width = geo.size.width / CGFloat(max(1, items.count))
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(LinearGradient(colors: [ink.primary.opacity(0.20), ink.primary.opacity(0.09)],
+                                         startPoint: .top, endPoint: .bottom))
+                    .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(
+                        LinearGradient(colors: [.white.opacity(0.65), .white.opacity(0.08), ink.primary.opacity(0.22)],
+                                       startPoint: .top, endPoint: .bottom),
+                        lineWidth: 1))
+                    .keyframeAnimator(initialValue: CGSize(width: 1, height: 1), trigger: selected) { drop, scale in
+                        drop.scaleEffect(x: scale.width, y: scale.height)
+                    } keyframes: { _ in
+                        SpringKeyframe(CGSize(width: 1.22, height: 0.92), duration: 0.17)
+                        SpringKeyframe(CGSize(width: 0.95, height: 1.03), duration: 0.18)
+                        SpringKeyframe(CGSize(width: 1, height: 1), duration: 0.24)
+                    }
+                    .frame(width: width, height: geo.size.height)
+                    .offset(x: width * CGFloat(selected ?? 0))
+                    .opacity(selected == nil ? 0 : 1)
+            }
+        }
+        .padding(6)
+        // The track is frost.
+        .background(ink.dense, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous).strokeBorder(ink.primary.opacity(0.10), lineWidth: 1))
+        .animation(.spring(response: 0.42, dampingFraction: 0.68), value: selected)
     }
 }
 
@@ -443,6 +486,22 @@ struct ClaudeIcon: View {
     }
 }
 
+/// Claude's mark in one color, taking the text's: the menu bar template that ships inside the installed Claude app, so
+/// no artwork of theirs is in this repository.
+struct ClaudeMark: View {
+    var size: CGFloat
+    private static let image: NSImage? = NSWorkspace.shared.urlForApplication(withBundleIdentifier: ClaudeApp.bundleID)
+        .flatMap { NSImage(contentsOf: $0.appendingPathComponent("Contents/Resources/TrayIconTemplate@3x.png")) }
+    var body: some View {
+        if let image = Self.image {
+            Image(nsImage: image).renderingMode(.template).resizable().interpolation(.high)
+                .frame(width: size, height: size).accessibilityHidden(true)
+        } else {
+            Image(systemName: "bubble.left.fill")
+        }
+    }
+}
+
 extension Color {
     /// The accent behind a selected piece of glass: white text reads on it in light and dark.
     static let accentGlass = Color(.sRGB, red: 0.145, green: 0.388, blue: 0.922, opacity: 1)
@@ -495,7 +554,7 @@ final class HUDController {
         guard let screen = NSScreen.main ?? NSScreen.screens.first else { return }
         let frame = screen.visibleFrame
         let width = IslandStack<EmptyView>.width + 60
-        let height = (frame.height * 0.6).rounded()
+        let height = frame.height
         panel.setFrame(NSRect(x: frame.midX - width / 2, y: frame.maxY - height, width: width, height: height), display: false)
     }
 

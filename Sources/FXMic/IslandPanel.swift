@@ -400,34 +400,36 @@ struct PanelView: View {
     @ObservedObject var island: HUDModel
     @State private var query = ""
     @State private var chosen = MicGesture.send
-    @State private var released = false                 // which set the gestures page shows
     @FocusState private var searching: Bool
     var close: () -> Void
+
+    private var squeezingNow: Bool { island.shown && (island.title == "Listening" || island.title == "Starting…") }
 
     var body: some View {
         let ink = Ink.of(scheme)
         VStack(spacing: 10) {
             VStack(spacing: 10) {
                 liveArea(ink)
-                // The bottom row stays where it is; what it opens slides in underneath it.
-                HStack(spacing: 8) {
-                    switcher(.settings, "Settings", "gearshape", ink)
-                    switcher(.gestures, "Gestures", "hand.point.up.left", ink)
-                    switcher(.pick, "Chats", nil, ink)
-                }
-                if model.page != .main || !ComposerDelivery.isTrusted {
+                // What the bottom row opens appears under everything, from the top, in one place.
+                ZStack(alignment: .top) {
+                if squeezingNow && model.page != .gestures {
+                    // The squeeze rail takes this place until the handle is let go.
+                } else if model.page == .gestures {
+                    gesturesPage(ink).transition(.opacity.combined(with: .offset(y: -8)))
+                } else if model.page != .main || !ComposerDelivery.isTrusted {
                     VStack(alignment: .leading, spacing: 4) {    // its own glass, apart from the live area
                         switch model.page {
                         case .main: mainPage(ink)
                         case .pick: pickPage(ink)
-                        case .gestures: gesturesPage(ink)
+                        case .gestures: EmptyView()
                         case .settings: settingsPage(ink)
                         }
                     }
                     .padding(10)
                     .frosted(RoundedRectangle(cornerRadius: 24, style: .continuous), tint: ink.wash)
                     .id(model.page)
-                    .transition(.opacity.combined(with: .offset(y: -16)))
+                    .transition(.opacity.combined(with: .offset(y: -8)))
+                }
                 }
             }
         }
@@ -448,9 +450,17 @@ struct PanelView: View {
         IslandStack(model: island,
                     // With the mic on USB a squeeze unmutes, so say so; over the audio cable only the Mac can.
                     idle: island.shown ? nil : off ? ("Muted", "mic.slash", false) : ("Squeeze to talk", "waveform", true),
-                    showsModes: model.page != .gestures,
                     idleDestination: off ? nil : model.selected ?? model.onScreen ?? "Conversation on screen",
-                    onUnpin: { model.select(nil) }) {
+                    onUnpin: { model.select(nil) },
+                    showsPin: model.page != .pick,
+                    fixed: AnyView(HStack(spacing: 8) {
+                        switcher(.pick, "Chats", nil, ink)
+                        switcher(.gestures, "Gestures", "hand.point.up.left", ink)
+                        switcher(.settings, "Settings", "gearshape", ink)
+                    }),
+                    railAlways: model.page == .gestures,
+                    demoPick: squeezeSet.firstIndex(of: doing),
+                    onPick: { chosen = squeezeSet[$0] }) {
             // Mute is plain glass; unmuting, the one thing to find when it's off, is green.
             if !live.usb {
             Button { model.controller.toggleArmed(source: "panel") } label: {
@@ -478,7 +488,7 @@ struct PanelView: View {
             Label {
                 Text(title)
             } icon: {
-                if let icon { Image(systemName: icon) } else { ClaudeIcon(size: 18) }
+                if let icon { Image(systemName: icon) } else { ClaudeMark(size: 20) }
             }
                 .font(.ui(14, .semibold)).foregroundStyle(on ? .white : ink.primary)
                 .frame(maxWidth: .infinity).frame(height: 56)
@@ -531,14 +541,13 @@ struct PanelView: View {
         ScrollView {
             VStack(spacing: 2) {
                 if let all = model.pickable {
-                    let found = all.filter { query.isEmpty || $0.localizedCaseInsensitiveContains(query) }
+                    // Pinned ones are above already, so each conversation (and its pin) is on screen once.
+                    let found = all.filter { !model.pins.contains($0) && (query.isEmpty || $0.localizedCaseInsensitiveContains(query)) }
                     ForEach(found, id: \.self) { chat in
                         PanelRow(selected: model.selected == chat, action: { model.select(chat); go(.main) }) {
                             ClaudeIcon(size: 22).frame(width: 28)
                             Text(chat).lineLimit(1)
                             Spacer()
-                            Image(systemName: model.pins.contains(chat) ? "pin.fill" : "pin")
-                                .foregroundStyle(model.pins.contains(chat) ? ink.accent : ink.secondary)
                         }
                     }
                     if found.isEmpty { Text("No conversation matches").foregroundStyle(ink.secondary).frame(height: 44) }
@@ -578,74 +587,42 @@ struct PanelView: View {
         }
     }
 
-    /// One gesture: the mic with the part to use lit, and what it does. Picking it plays it on the drawing above; the
-    /// one the real mic is doing is highlighted.
-    func gestureItem(_ gesture: MicGesture, _ label: String, _ ink: Ink, @ViewBuilder glyph: () -> some View) -> some View {
-        // Squeezing with nothing else picked means "release to send".
-        let real = live.squeezing || live.flashAt.map { Date().timeIntervalSince($0) < 2.5 } == true
-        let doing = real ? (live.last == .talk ? .send : live.last) : chosen
-        let on = doing == gesture
-        return Button { withAnimation(.easeInOut(duration: 0.18)) { chosen = gesture } } label: {
-            VStack(spacing: 5) {
-                glyph().frame(width: 34, height: 34)
-                Text(label)
-                    .font(.ui(12, on ? .semibold : .medium)).foregroundStyle(on ? ink.accent : ink.primary)
-                    .multilineTextAlignment(.center).lineLimit(2, reservesSpace: true).minimumScaleFactor(0.85)
-            }
-            .frame(maxWidth: .infinity).padding(.vertical, 8)
-            .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(on ? ink.accent.opacity(0.18) : .clear))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(on ? .isSelected : [])
+    /// The squeeze rail's gestures, in its order (it lives in the island above).
+    private var squeezeSet: [MicGesture] { Settings.shared.shakeToCancel ? [.send, .queue, .draft, .cancel] : [.send, .queue, .draft] }
+
+    /// What the rails highlight: for a moment after the real mic did something, that; otherwise the picked demo.
+    private var doing: MicGesture {
+        let recent = live.flashAt.map { Date().timeIntervalSince($0) < 2.5 } == true
+        guard recent, let last = live.last else { return chosen }
+        return last == .talk ? .send : last
     }
 
+    /// Below the squeeze rail: the same rail for what the buttons do with the handle released, then one card that only
+    /// holds the drawing and its caption, whatever is picked above.
     @ViewBuilder func gesturesPage(_ ink: Ink) -> some View {
         let claude = chosen == .claude
-        MicDemo(chosen: chosen, ink: ink, live: live, island: island).id(chosen).frame(height: 220)
-            .task(id: chosen) {          // the mode item plays both directions in turn
-                guard chosen.isModeSwitch else { return }
-                try? await Task.sleep(for: .seconds(5.4))
-                if !Task.isCancelled { withAnimation(.snappy) { chosen = chosen == .ko2 ? .claude : .ko2 } }
-            }
-        // One set at a time: the handle squeezed or released. The real handle picks it while you use the mic, and the
-        // island's own action row steps aside here, so nothing is on screen twice.
-        let showReleased = !live.squeezing && released
-        HStack(spacing: 4) {
-            side("Squeezing", !showReleased, ink) { released = false; chosen = .send }
-            side("Handle released", showReleased, ink) { released = true; chosen = .show }
-        }
-        .padding(4)
-        .background(Capsule().fill(ink.hover))
-        HStack(spacing: 2) {
-            if showReleased {
-                gestureItem(.show, bottomButtonLabel, ink) { MicButtonGlyph(pressed: 2, line: ink.secondary) }
-                if !live.usb { gestureItem(.hangUp, "Twice to\nmute", ink) { MicButtonGlyph(pressed: 2, line: ink.secondary) } }
-                gestureItem(claude ? .claude : .ko2, claude ? "Hold top\nfor Claude" : "Hold middle\nfor K.O. II", ink) {
+        let mode: MicGesture = claude ? .claude : .ko2
+        let released: [MicGesture] = live.usb ? [.show, mode] : [.show, .hangUp, mode]
+        VStack(spacing: 10) {
+            ActionRail(items: released.map { gesture in
+                switch gesture {
+                case .show: RailItem(bottomButtonLabel) { MicButtonGlyph(pressed: 2, line: ink.secondary) }
+                case .hangUp: RailItem("Twice to\nmute") { MicButtonGlyph(pressed: 2, line: ink.secondary) }
+                default: RailItem(claude ? "Hold top\nfor Claude" : "Hold middle\nfor K.O. II") {
                     MicButtonGlyph(pressed: claude ? 0 : 1, line: ink.secondary)
                 }
-            } else {
-                // The same four, in the same order, as on the island.
-                gestureItem(.send, "Release\nto send", ink) { MovingGlyph(kind: .release, line: ink.secondary) }
-                gestureItem(.queue, "Top to\nqueue", ink) { MicButtonGlyph(pressed: 0, line: ink.secondary) }
-                gestureItem(.draft, "Middle\nto draft", ink) { MicButtonGlyph(pressed: 1, line: ink.secondary) }
-                if Settings.shared.shakeToCancel {
-                    gestureItem(.cancel, "Shake to\ncancel", ink) { MovingGlyph(kind: .shake, line: ink.secondary) }
                 }
-            }
+            }, selected: live.squeezing ? nil : released.firstIndex(of: doing), onPick: { chosen = released[$0] })
+            MicDemo(chosen: chosen, ink: ink, live: live, island: island).id(chosen)
+                .frame(maxWidth: .infinity, minHeight: 232, maxHeight: 232)
+                .padding(10)
+                .frosted(RoundedRectangle(cornerRadius: 24, style: .continuous), tint: ink.wash)
         }
-    }
-
-    func side(_ title: String, _ on: Bool, _ ink: Ink, _ pick: @escaping () -> Void) -> some View {
-        Button { withAnimation(.easeInOut(duration: 0.18)) { pick() } } label: {
-            Text(title).font(.ui(14, on ? .semibold : .medium))
-                .foregroundStyle(on ? ink.primary : ink.secondary)
-                .frame(maxWidth: .infinity, minHeight: 32)
-                .background(Capsule().fill(on ? ink.accent.opacity(0.22) : .clear))
-                .contentShape(Capsule())
+        .task(id: chosen) {          // the mode item plays both directions in turn
+            guard chosen.isModeSwitch else { return }
+            try? await Task.sleep(for: .seconds(5.4))
+            if !Task.isCancelled { withAnimation(.snappy) { chosen = chosen == .ko2 ? .claude : .ko2 } }
         }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(on ? .isSelected : [])
     }
 
     func toggle(_ title: String, _ value: Binding<Bool>) -> some View {
@@ -714,7 +691,6 @@ final class IslandPanelController: NSObject {
     private var panel: NSPanel?
     private var keys: Any?
     private var top = NSPoint.zero
-    private var wanted = CGSize.zero
 
     init(controller: AppController) {
         self.controller = controller
@@ -747,12 +723,13 @@ final class IslandPanelController: NSObject {
         let host = NSHostingView(rootView: PanelView(model: model, live: controller.live, island: controller.hud.model,
                                                      close: { [weak self] in self?.close() })
             .fixedSize()
-            .onGeometryChange(for: CGSize.self, of: { $0.size }) { [weak self] size in self?.fit(size) }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top))
         host.sizingOptions = []
         p.contentView = host
         panel = p
-        fit(NSSize(width: 444, height: 400))
+        // As tall as the screen allows and never resized, so content only ever grows downward from the top. The empty
+        // part is transparent, which lets clicks through.
+        p.setFrame(NSRect(x: top.x, y: visible.minY, width: 444, height: top.y - visible.minY), display: false)
         controller.hud.setEmbedded(true)
         p.makeKeyAndOrderFront(nil)
         model.startFollowing()
@@ -762,17 +739,6 @@ final class IslandPanelController: NSObject {
             self?.close()
             return nil
         }
-    }
-
-    /// The window is only as big as what it shows, so the rest of the screen stays clickable.
-    private func fit(_ size: CGSize) {
-        guard let panel, size.width > 0, size.height > 0 else { return }
-        wanted = size
-        let apply = { [weak self] in
-            guard let self, let panel = self.panel, self.wanted == size else { return }
-            panel.setFrame(NSRect(x: self.top.x, y: self.top.y - size.height, width: size.width, height: size.height), display: true)
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + (size.height < panel.frame.height ? 0.4 : 0), execute: apply)
     }
 
     private func close() {
