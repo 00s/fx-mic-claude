@@ -528,12 +528,19 @@ struct MicButtonGlyph: View {
                            with: .color(line.opacity(0.7)))
                 }
             }
-            if pressed == Self.shake {                                // motion marks either side
-                for (x, bulge) in [(168.0, -60.0), (1232.0, 60.0)] {
-                    var mark = Path()
-                    mark.move(to: CGPoint(x: x, y: 380))
-                    mark.addQuadCurve(to: CGPoint(x: x, y: 840), control: CGPoint(x: x + bulge * 1.6, y: 610))
-                    stroke(mark, hex(0xEB6133))
+            if pressed == Self.shake {
+                // Motion marks either side, like a cartoon shake: two short arcs a side, curving away from the body,
+                // bolder than the outline so they read at 34 pt.
+                // Beside the lower body, clear of the handle on the left and the buttons on the right.
+                for side in [-1.0, 1.0] {
+                    for (i, x) in Array(side < 0 ? [272.0, 200.0] : [1180.0, 1252.0]).enumerated() {
+                        let half = i == 0 ? 150.0 : 105.0
+                        var mark = Path()
+                        mark.move(to: CGPoint(x: x, y: 790 - half))
+                        mark.addQuadCurve(to: CGPoint(x: x, y: 790 + half), control: CGPoint(x: x + side * 50, y: 790))
+                        g.stroke(mark, with: .color(hex(0xEB6133)),
+                                 style: StrokeStyle(lineWidth: width * 1.8, lineCap: .round, lineJoin: .round))
+                    }
                 }
             }
             for (i, y) in [236.0, 500.0, 913.0].enumerated() {
