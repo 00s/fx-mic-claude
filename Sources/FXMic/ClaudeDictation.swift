@@ -110,9 +110,22 @@ final class ClaudeDictation {
         let window = found.window, composer = found.composer
 
         let labels = Settings.shared.dictationButtonLabels.map { $0.lowercased() }
+        if let finish = finishButton(near: composer, in: window) {
+            Log.write("dictation: Claude was already dictating, finishing that first")
+            AXUIElementPerformAction(finish, kAXPressAction as CFString)
+            for _ in 0..<20 {
+                Thread.sleep(forTimeInterval: 0.1)
+                if finishButton(near: composer, in: window) == nil { break }
+            }
+            guard finishButton(near: composer, in: window) == nil else {
+                Log.write("dictation: could not get Claude's dictation to a stopped state")
+                return .failure(.noButton)
+            }
+            Thread.sleep(forTimeInterval: 0.3)       // let the finished dictation's text settle into the composer
+        }
         let candidates = buttonsNear(composer, in: window).filter { el in
             let l = label(el).lowercased()
-            return labels.contains { l.contains($0) } && !l.contains("voice mode")
+            return labels.contains { l.contains($0) } && !l.contains("voice mode") && !l.contains("cancel dictation")
         }
         guard var button = candidates.first else {
             logButtons(window: window, composer: composer, why: "no match for \(labels)")
@@ -165,6 +178,7 @@ final class ClaudeDictation {
         for _ in 0..<20 {
             Thread.sleep(forTimeInterval: 0.1)
             nowLabel = buttonLabel(current) ?? idleLabel
+            if finishButton(near: composer, in: window) != nil { nowLabel = "Finish dictation"; current.labelChanged = true; break }
             if nowLabel != idleLabel { current.labelChanged = true; break }
             if ClaudeApp.isUsingMic() { current.micSeen = true; break }
         }
@@ -222,12 +236,18 @@ final class ClaudeDictation {
 
     private func end(_ r: inout Run) -> String {
         let pressedAt = Date()
-        if let button = button(at: r.buttonCenter, in: r.window) {
+        // Project threads and chats replace the dictation button with separate "Finish dictation" and "Cancel dictation"
+        // buttons. Finish is only there while Claude listens; Cancel can sit where the button was and is never pressed.
+        if let finish = finishButton(near: r.composer, in: r.window) {
+            let ok = AXUIElementPerformAction(finish, kAXPressAction as CFString) == .success
+            Log.write(ok ? "dictation: pressed \"Finish dictation\" to finish" : "dictation: Finish dictation press failed")
+        } else if let button = button(at: r.buttonCenter, in: r.window) {
             let l = label(button)
             // Press only the dictation control, and only while it is listening: a control that moved there, or a
             // dictation Claude already stopped (a press would start it again), is left alone.
             let lower = l.lowercased()
-            let isDictation = lower.contains("dictat") || dictationLabels.contains { lower.contains($0) }
+            let isDictation = (lower.contains("dictat") || dictationLabels.contains { lower.contains($0) })
+                && !lower.contains("cancel dictation")
             if !isDictation {
                 Log.write("dictation: the control at the dictation button's place is \"\(l)\", not pressed")
             } else if !Self.isListening(l), !ClaudeApp.isUsingMic() {
@@ -403,7 +423,7 @@ final class ClaudeDictation {
             guard AX.isTrusted, let app = ClaudeApp.running else { Log.write("axdump: no access or Claude not running"); return }
             let axApp = AXUIElementCreateApplication(app.processIdentifier)
             AXUIElementSetAttributeValue(axApp, "AXManualAccessibility" as CFString, kCFBooleanTrue)
-            guard let found = ComposerDelivery.locateComposer(axApp) else { Log.write("axdump: composer not found"); return }
+            guard let found = ComposerDelivery.locateComposer(axApp) else { logTextAreas(axApp); return }
             logButtons(window: found.window, composer: found.composer, why: "requested")
             // Read-only: which conversations a pin could reach (a pin works only through a sidebar row).
             let rows = SessionStore.recent(limit: 8).map { s in
@@ -414,7 +434,7 @@ final class ClaudeDictation {
     }
 
     private func logButtons(window: AXUIElement, composer: AXUIElement, why: String) {
-        let composers = AX.find(window, depth: 0) { AX.role($0) == "AXTextArea" && AX.string($0, kAXDescriptionAttribute) == "Prompt" }
+        let composers = AX.composers(in: window)
         var out = "dictation: controls near the composer (\(why)); \(composers.count) composer(s) in the window, using the first"
         for (i, c) in composers.enumerated() {
             let cf = AX.frame(c)
@@ -429,6 +449,30 @@ final class ClaudeDictation {
                 let f = AX.frame(el)
                 out += String(format: "\n   %@ \"%@\" at %.0f,%.0f %.0fx%.0f", self.kind(el), self.label(el), f.minX, f.minY, f.width, f.height)
             }
+        }
+        Log.write(out)
+    }
+
+    /// No composer found: log what the window does have (text areas, labelled buttons, its windows), so a new kind
+    /// of Claude view can be taught from one dump. Labels only, never text values.
+    private func logTextAreas(_ axApp: AXUIElement) {
+        let windows = (AX.attribute(axApp, kAXWindowsAttribute) as? [AXUIElement]) ?? []
+        let main = (AX.attribute(axApp, kAXMainWindowAttribute) as! AXUIElement?) ?? windows.first
+        var out = "axdump: composer not found; \(windows.count) window(s): "
+            + windows.map { "\"\(AX.string($0, kAXTitleAttribute))\"" }.joined(separator: ", ")
+        guard let main else { Log.write(out + "; no main window"); return }
+        out += "; main \"\(AX.string(main, kAXTitleAttribute))\""
+        for el in AX.find(main, depth: 0, { ["AXTextArea", "AXTextField"].contains(AX.role($0)) }) {
+            let f = AX.frame(el)
+            out += String(format: "\n  %@ \"%@\" at %.0f,%.0f %.0fx%.0f%@", kind(el), label(el), f.minX, f.minY, f.width, f.height,
+                          (AX.attribute(el, kAXFocusedAttribute) as? Bool) == true ? " (focused)" : "")
+        }
+        for el in AX.find(main, depth: 0, { AX.role($0) == "AXButton" }) {
+            let d = AX.string(el, kAXDescriptionAttribute), t = AX.string(el, kAXTitleAttribute)
+            guard !(d + t).isEmpty else { continue }
+            let f = AX.frame(el)
+            out += String(format: "\n  AXButton \"%@\" at %.0f,%.0f %.0fx%.0f", [d, t].filter { !$0.isEmpty }.joined(separator: " | "),
+                          f.minX, f.minY, f.width, f.height)
         }
         Log.write(out)
     }
@@ -456,6 +500,10 @@ final class ClaudeDictation {
             let f = AX.frame(el)
             return f.width > 0 && f.maxY >= cf.minY - 60 && f.minY <= cf.maxY + 80
         }
+    }
+
+    private func finishButton(near composer: AXUIElement, in window: AXUIElement) -> AXUIElement? {
+        buttonsNear(composer, in: window).first { label($0).lowercased().contains("finish dictation") }
     }
 
     private func button(at center: CGPoint, in window: AXUIElement) -> AXUIElement? {
