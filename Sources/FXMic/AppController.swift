@@ -31,11 +31,15 @@ final class AppController {
         ])
     }
     var onStateChange: (() -> Void)?
+    /// The bottom button asked for the panel; the menu bar item owns it.
+    var onPanelRequest: (() -> Void)?
     var onActivity: ((StatusMenu.Activity) -> Void)?
     var onRecentChange: (() -> Void)?
 
     let settings = Settings.shared
     let hud = HUDController()
+    /// What the mic is doing right now, for the panel's drawing of it.
+    let live = LiveMic()
     let dispatcher = Dispatcher()
     private let activity = ActivityWatcher()
     /// Claude's own dictation, used when settings.transcriptionEngine is "claude".
@@ -152,8 +156,8 @@ final class AppController {
         let now = Date()
         guard now.timeIntervalSince(lastToggle) > 0.6 else { Log.write("toggle from \(source) ignored (debounce)"); return }
         lastToggle = now
-        Log.write("toggle from \(source): \(state == .idle ? "pick up" : "hang up")")
-        state == .idle ? arm() : disarm(reason: "hung up via \(source)")
+        Log.write("toggle from \(source): \(state == .idle ? "unmute" : "mute")")
+        state == .idle ? arm() : disarm(reason: "muted via \(source)")
     }
 
     func arm() {
@@ -565,6 +569,16 @@ final class AppController {
         let viaClaude = claudeSqueeze
         claudeSqueeze = false
         let t = appleWanted ? transcriber : nil
+        // Shaken: already canceled and cleared. Only close the recognizer's utterance; nothing to wait for or deliver.
+        if canceled {
+            if let t { Task.detached { _ = await t.finishUtterance() } }
+            DispatchQueue.main.async {
+                if self.activeSqueeze == serial { self.activeSqueeze = nil }
+                self.canceledSerials.remove(serial)
+                self.intents[serial] = nil
+            }
+            return
+        }
         guard t != nil || viaClaude else {
             DispatchQueue.main.async { self.hud.flash("Transcriber not ready yet", tint: .yellow, icon: "hourglass") }
             return
@@ -623,6 +637,7 @@ final class AppController {
     private var appleWanted: Bool { settings.transcriptionEngine != "claude" || settings.appleFallback }
 
     private func squeezeStarted() {
+        DispatchQueue.main.async { self.live.squeeze(true) }
         lastActivity = Date()
         squeezeStartedAt = Date()
         lastSpeechAt = .distantPast
@@ -638,6 +653,7 @@ final class AppController {
     }
 
     private func squeezeEnded() {
+        DispatchQueue.main.async { self.live.squeeze(false) }
         Log.write("handle released" + (usbLive ? " (usb)" : ""))
         handleMode = false
         endUtterance(frames: openFrames)
@@ -647,10 +663,20 @@ final class AppController {
 
     private func shakeCancel() {
         guard settings.shakeToCancel else { return }
+        DispatchQueue.main.async { self.live.shake() }
         Log.write("shake: cancel")
         let serial = utteranceSerial
         canceled = true
-        DispatchQueue.main.async { self.canceledSerials.insert(serial); self.hud.canceled() }
+        // Cancel takes effect now, not at the release: Claude stops listening and the composer goes back as it was.
+        let wasDictating = claudeSqueeze
+        claudeSqueeze = false
+        if wasDictating { dictation.abort() }
+        DispatchQueue.main.async {
+            self.canceledSerials.insert(serial)
+            self.claudeLive = false
+            self.dictatedSession[serial] = nil
+            self.hud.canceled()
+        }
     }
 
     private func usbEvent(_ event: MicSerial.Event) {
@@ -662,7 +688,7 @@ final class AppController {
             case .press:
                 pendingWakeSqueeze = true
                 DispatchQueue.main.async {
-                    Log.write("usb: squeeze while hung up, picking up")
+                    Log.write("usb: squeeze while muted, unmuting")
                     self.arm()
                     self.pipeline.async {
                         guard self.pendingWakeSqueeze else { return }
@@ -674,7 +700,7 @@ final class AppController {
                 pendingWakeSqueeze = false          // released before FXMic was ready: too short to be a message
             case .tap:
                 DispatchQueue.main.async {
-                    Log.write("usb: tap while hung up, picking up")
+                    Log.write("usb: tap while muted, unmuting")
                     self.ignoreTapsUntil = Date().addingTimeInterval(0.6)
                     self.arm()
                 }
@@ -715,6 +741,8 @@ final class AppController {
 
     private func usbLiveChanged(_ live: Bool) {
         usbLiveMain = live
+        self.live.usb = live
+        onStateChange?()
         Log.write(live ? "usb: the mic reports squeezes; the input stays closed between squeezes"
                        : "usb: no squeeze reports; listening for the marker tones")
         snapshot()
@@ -976,6 +1004,7 @@ final class AppController {
 
     /// Records the queue/draft choice for the squeeze in progress and shows it in the Listening bar. Capture queue.
     private func setIntent(_ intent: Intent) {
+        DispatchQueue.main.async { self.live.press(intent == .queue ? 0 : 1) }
         let serial = utteranceSerial
         Log.write("during squeeze: \(intent == .queue ? "top (FX) button: queue" : "middle (sample) button: draft")")
         DispatchQueue.main.async {
@@ -1111,10 +1140,18 @@ final class AppController {
     // MARK: button gestures (main)
 
     private func tapAction(count: Int, duringSpeech: Bool) {
+        if !duringSpeech { live.press(2) }
         Log.write("tap x\(count)\(duringSpeech ? " while squeezed (ignored)" : "")")
         if duringSpeech { return }          // cancel is a shake now; the button does nothing while the handle is in
         lastActivity = Date()
-        if count == 1 { ClaudeApp.toggle() } else { disarm(reason: "double tap") }
+        // Over USB there is nothing to mute (the input is already closed between squeezes): a double tap does nothing.
+        guard count == 1 else { if !usbLiveMain { live.last = .hangUp; disarm(reason: "double tap") }; return }
+        switch settings.bottomButton {
+        case "claude": ClaudeApp.show()
+        case "toggle": ClaudeApp.toggle()
+        case "none": break
+        default: onPanelRequest?()
+        }
     }
 
 

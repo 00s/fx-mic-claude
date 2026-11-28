@@ -6,6 +6,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Log.write("launch \(Bundle.main.bundleIdentifier ?? "bare") pid \(ProcessInfo.processInfo.processIdentifier)")
+        let missing = ["Inter Tight", "JetBrains Mono"].filter { NSFontManager.shared.availableMembers(ofFontFamily: $0) == nil }
+        Log.write(missing.isEmpty ? "fonts: bundled typefaces loaded" : "fonts: missing \(missing.joined(separator: ", "))")
         controller = AppController()
         statusMenu = StatusMenu(controller: controller)
         controller.onActivity = { [weak self] a in self?.statusMenu.setActivity(a) }

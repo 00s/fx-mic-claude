@@ -93,6 +93,11 @@ final class Settings {
     var stuckSqueezeSeconds: Double { d.double(forKey: "stuckSqueezeSeconds") }
     /// Write what you say into ~/.fxmic/fxmic.log and the system log. Off: only how many words, so the log can be
     /// shared for debugging and keeps no conversation content. Turn on to compare transcripts.
+    /// Conversations kept in the panel to send to with one click; targetSessionTitle is the one selected.
+    var pinnedTitles: [String] { get { d.stringArray(forKey: "pinnedTitles") ?? [] } set { d.set(newValue, forKey: "pinnedTitles") } }
+    /// What one press of the mic's bottom (play) button does, handle released: "panel" (open or close FXMic's panel),
+    /// "claude" (bring Claude forward), "toggle" (bring Claude forward, again to go back) or "none".
+    var bottomButton: String { get { d.string(forKey: "bottomButton") ?? "panel" } set { d.set(newValue, forKey: "bottomButton") } }
     var logTranscripts: Bool { d.bool(forKey: "logTranscripts") }
     /// The pick-up / hang-up shortcut, recorded from the menu: Carbon key code and modifier bits, and how it reads.
     var hotKeyCode: Int { get { d.integer(forKey: "hotKeyCode") } set { d.set(newValue, forKey: "hotKeyCode") } }

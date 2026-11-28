@@ -70,6 +70,11 @@ enum ClaudeApp {
         }
     }
 
+    /// Brings Claude to the front and leaves it there.
+    static func show() {
+        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) { bringForward(url) }
+    }
+
     private static func bringForward(_ url: URL) {
         let config = NSWorkspace.OpenConfiguration()
         config.activates = true

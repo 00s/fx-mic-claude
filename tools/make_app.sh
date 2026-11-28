@@ -10,6 +10,9 @@ APP="$ROOT/build/FXMic.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp ".build/release/FXMic" "$APP/Contents/MacOS/FXMic"
+# Inter Tight and JetBrains Mono (SIL Open Font License, texts alongside), registered through ATSApplicationFontsPath.
+mkdir -p "$APP/Contents/Resources/Fonts"
+cp fonts/*.ttf fonts/OFL-*.txt "$APP/Contents/Resources/Fonts/"
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -23,6 +26,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleVersion</key><string>1</string>
   <key>LSMinimumSystemVersion</key><string>26.0</string>
   <key>LSUIElement</key><true/>
+  <key>ATSApplicationFontsPath</key><string>Fonts</string>
   <key>NSMicrophoneUsageDescription</key><string>FXMic listens to the EP-2350 through the Sabrent input and transcribes on-device.</string>
   <key>NSSpeechRecognitionUsageDescription</key><string>On-device transcription of what you say into the mic.</string>
   <key>NSHighResolutionCapable</key><true/>

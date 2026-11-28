@@ -52,6 +52,18 @@ enum ComposerDelivery {
         return activeSessionTitle(in: found.window)
     }
 
+    /// The titles among these that have a sidebar row right now, so a pin to them can be shown.
+    static func reachable(_ titles: [String]) -> [String] {
+        guard isTrusted, let app = ClaudeApp.running else { return [] }
+        let axApp = AXUIElementCreateApplication(app.processIdentifier)
+        let windows = (attribute(axApp, kAXWindowsAttribute) as? [AXUIElement]) ?? []
+        guard let main = (attribute(axApp, kAXMainWindowAttribute) as! AXUIElement?) ?? windows.first else { return [] }
+        let labels = find(main, depth: 0) { ["AXLink", "AXButton"].contains(role($0)) }.flatMap {
+            [string($0, kAXTitleAttribute), string($0, kAXDescriptionAttribute)]
+        }
+        return titles.filter { t in labels.contains { $0 == t || $0.hasPrefix(t + " ") || $0 == "Idle " + t || $0 == "Running " + t } }
+    }
+
     /// The sidebar rows that would show the session with this title, exact matches first. Rows are links labelled with
     /// the title, plus a state while one applies ("… Running Open · 5 pull requests"); older Claude builds used
     /// buttons titled "Idle <title>" or "Running <title>".

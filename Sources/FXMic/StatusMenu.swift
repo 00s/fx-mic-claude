@@ -1,4 +1,6 @@
 import AppKit
+import Combine
+import SwiftUI
 import FXMicCore
 import ServiceManagement
 
@@ -11,15 +13,27 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     private var dotPhase = 0
     private var doneReset: DispatchWorkItem?
 
-    /// Draws the handset with an optional badge in the lower-right corner: dots while the task runs, a check when
-    /// it finishes. The badge is knocked out of the handset first so it reads as its own shape (template image).
-    private static func compose(base: String, dots: Int = 0, check: Bool = false) -> NSImage {
-        let side: CGFloat = 18
-        let image = NSImage(size: NSSize(width: side, height: side), flipped: false) { _ in
-            let config = NSImage.SymbolConfiguration(pointSize: 15, weight: .medium)
-            if let phone = NSImage(systemSymbolName: base, accessibilityDescription: nil)?.withSymbolConfiguration(config) {
-                let pr = NSRect(x: (side - phone.size.width) / 2, y: (side - phone.size.height) / 2, width: phone.size.width, height: phone.size.height)
-                phone.draw(in: pr)
+    /// The mic glyph for a state, with an optional badge in the upper-right corner: dots while the task runs, a check
+    /// when it finishes. Template (it follows the menu bar's color) unless a part is lit in its device color.
+    private static func compose(part: Int, hungUp: Bool, dark: Bool, dots: Int = 0, check: Bool = false) -> NSImage {
+        let side: CGFloat = 20
+        let line: Color = dark ? .white : .black          // not a template: the white lower half must stay white
+        let ink: NSColor = dark ? .white : .black
+        let glyph = MainActor.assumeIsolated { () -> NSImage? in
+            let renderer = ImageRenderer(content: MicButtonGlyph(pressed: part, line: line, side: side, solid: true))
+            renderer.scale = 2
+            return renderer.nsImage
+        }
+        let image = NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
+            glyph?.draw(in: rect, from: .zero, operation: .sourceOver, fraction: hungUp ? 0.45 : 1)
+            if hungUp {
+                let slash = NSBezierPath()
+                slash.move(to: NSPoint(x: 3, y: 2.5))
+                slash.line(to: NSPoint(x: side - 3, y: side - 2.5))
+                slash.lineWidth = 1.6
+                slash.lineCapStyle = .round
+                ink.setStroke()
+                slash.stroke()
             }
             let ctx = NSGraphicsContext.current
             if dots > 0 {
@@ -33,19 +47,20 @@ final class StatusMenu: NSObject, NSMenuDelegate {
                     NSBezierPath(ovalIn: NSRect(x: x0 + CGFloat(i) * (d + gap), y: y, width: d, height: d).insetBy(dx: -1.1, dy: -1.1)).fill()
                 }
                 ctx?.compositingOperation = .sourceOver
+                ink.setFill()
                 for i in 0..<dots {
                     NSBezierPath(ovalIn: NSRect(x: x0 + CGFloat(i) * (d + gap), y: y, width: d, height: d)).fill()
                 }
             }
             if check, let mark = NSImage(systemSymbolName: "checkmark", accessibilityDescription: nil)?
-                .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 8, weight: .heavy)) {
+                .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 8, weight: .heavy).applying(.init(paletteColors: [ink]))) {
                 let r = NSRect(x: side - mark.size.width - 0.5, y: side - mark.size.height - 0.5, width: mark.size.width, height: mark.size.height)
                 mark.draw(in: r.insetBy(dx: -1.4, dy: -1.4), from: .zero, operation: .destinationOut, fraction: 1)
                 mark.draw(in: r)
             }
             return true
         }
-        image.isTemplate = true
+        image.isTemplate = false
         return image
     }
 
@@ -73,42 +88,65 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     }
     private unowned let controller: AppController
     private let menu = NSMenu()
+    private var watch: [AnyCancellable] = []
+    private lazy var panel = IslandPanelController(controller: controller)
 
     init(controller: AppController) {
         self.controller = controller
         super.init()
         menu.delegate = self
-        // Left click picks up or hangs up; right click (or control-click) opens the menu.
+        // Click opens the panel; right click (or control-click) picks up or hangs up; Option-click shows the plain menu.
         if let button = item.button {
             button.target = self
             button.action = #selector(statusClicked(_:))
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
         refresh()
-        controller.onStateChange = { [weak self] in self?.refresh() }
+        controller.onStateChange = { [weak self] in
+            self?.refresh()
+            if let self { self.controller.live.state = self.controller.state }
+        }
+        controller.onPanelRequest = { [weak self] in
+            guard let self, let button = self.item.button else { return }
+            self.panel.toggle(under: button)
+        }
+        // Queue, draft and shake change the icon too; wait a turn so the new value is in place.
+        watch = [
+            controller.hud.model.$intent.receive(on: RunLoop.main).sink { [weak self] _ in self?.refresh() },
+            controller.live.$shakeAt.receive(on: RunLoop.main).sink { [weak self] at in
+                self?.refresh()
+                if at != nil { DispatchQueue.main.asyncAfter(deadline: .now() + 1.3) { self?.refresh() } }
+            },
+        ]
         controller.dispatcher.onTargetsChanged = { [weak self] in self?.refresh() }
     }
 
     func refresh() {
-        let symbol: String
-        switch controller.state {
-        case .idle: symbol = Settings.shared.iconIdle
-        case .armed: symbol = Settings.shared.iconArmed
-        case .listening: symbol = Settings.shared.iconListening
+        // The same pictures as the island's choices: handle while squeezing, top for queue, middle for draft, motion
+        // marks for a shake; the plain mic while waiting, struck through when hung up.
+        let model = controller.hud.model
+        let shaken = controller.live.shakeAt.map { Date().timeIntervalSince($0) < 1.2 } == true
+        let part: Int = shaken ? MicButtonGlyph.shake
+            : controller.state != .listening ? MicButtonGlyph.none
+            : model.intent == "Queue" ? 0 : model.intent == "Draft" ? 1 : MicButtonGlyph.squeeze
+        let dark = item.button?.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        let hungUp = controller.state == .idle && !controller.usbLiveMain
+        func image(dots: Int = 0, check: Bool = false) -> NSImage {
+            StatusMenu.compose(part: part, hungUp: hungUp, dark: dark, dots: dots, check: check)
         }
         switch Settings.shared.statusBadge ? activity : .none {
-        case .thinking: item.button?.image = StatusMenu.compose(base: symbol, dots: max(1, dotPhase))
-        case .done: item.button?.image = StatusMenu.compose(base: symbol, check: true)
-        case .none: item.button?.image = StatusMenu.compose(base: symbol)
+        case .thinking: item.button?.image = image(dots: max(1, dotPhase))
+        case .done: item.button?.image = image(check: true)
+        case .none: item.button?.image = image()
         }
-        item.button?.toolTip = "FXMic: \(controller.state.rawValue). Click to \(controller.state == .idle ? "pick up" : "hang up"), right-click for the menu."
+        item.button?.toolTip = "FXMic: \(controller.state.rawValue). Click for the panel, right-click to \(controller.state == .idle ? "unmute" : "mute")."
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
 
         // 1. listening toggle
-        let toggle = NSMenuItem(title: controller.state == .idle ? "Start listening" : "Stop listening", action: #selector(toggleArmed), keyEquivalent: "")
+        let toggle = NSMenuItem(title: controller.state == .idle ? "Unmute" : "Mute", action: #selector(toggleArmed), keyEquivalent: "")
         toggle.target = self
         menu.addItem(toggle)
 
@@ -187,7 +225,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         resetItem.target = self
         resetItem.isEnabled = Settings.shared.hotKeyLabel != "⌘⇧M"
         shortcutMenu.addItem(resetItem)
-        let shortcutItem = NSMenuItem(title: "Pick-up shortcut: \(Settings.shared.hotKeyLabel)", action: nil, keyEquivalent: "")
+        let shortcutItem = NSMenuItem(title: "Mute shortcut: \(Settings.shared.hotKeyLabel)", action: nil, keyEquivalent: "")
         shortcutItem.submenu = shortcutMenu
         menu.addItem(shortcutItem)
         let badge = NSMenuItem(title: "Menu bar activity badge", action: #selector(toggleBadge), keyEquivalent: "")
@@ -213,13 +251,16 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     @objc private func toggleArmed() { controller.toggleArmed(source: "menu item") }
     @objc private func statusClicked(_ sender: NSStatusBarButton) {
         let event = NSApp.currentEvent
-        let wantsMenu = event?.type == .rightMouseUp || (event?.modifierFlags.contains(.control) ?? false)
-        if wantsMenu {
-            item.menu = menu           // attach only for this click so the next left click toggles again
+        if event?.modifierFlags.contains(.option) == true {
+            item.menu = menu           // the plain menu, as a fallback; attached only for this click
             sender.performClick(nil)
             item.menu = nil
+        } else if event?.type == .rightMouseUp || event?.modifierFlags.contains(.control) == true {
+            // Muting only means something on the audio cable; on USB a right-click opens the panel like a click.
+            if controller.usbLiveMain && controller.state != .idle { panel.toggle(under: sender) }
+            else { controller.toggleArmed(source: "menu bar click") }
         } else {
-            controller.toggleArmed(source: "menu bar click")
+            panel.toggle(under: sender)
         }
     }
 

@@ -23,13 +23,16 @@ patch goes.
 | shake the mic hard while squeezing | the message is canceled, nothing is sent |
 | press the top (FX) button while squeezing | queue: the message waits until the Claude session finishes its turn, then is sent |
 | press the middle (sample) button while squeezing | draft: the message is added to the composer, after any text already there, and not sent |
-| tap the bottom (play) button, handle released | the Claude window comes forward; tap again to go back |
-| two quick taps on the bottom (play) button, handle released | the app hangs up (stops listening, orange dot off) |
-| left-click the menu bar handset | pick up or hang up |
-| right-click the menu bar handset | menu: stop/start listening, input device, target session, shake to cancel, activity badge, launch at login, quit |
-| `⌘⇧M` (change it in the menu: "Pick-up shortcut") | pick up or hang up |
+| tap the bottom (play) button, handle released | opens or closes the FXMic panel; change it under Settings, "Bottom button" (bring Claude forward, show or hide Claude, or nothing) |
+| two quick taps on the bottom (play) button, handle released | the app mutes (stops listening, orange dot off) |
+| click the menu bar mic icon | the panel: live state and transcript, where messages go, mic gestures, settings |
+| right-click the menu bar mic icon | mute or unmute (Option-click: a plain menu) |
+| `⌘⇧M` (change it in the menu: "Mute shortcut") | mute or unmute |
 
-English and Spanish are both recognized, chosen per message. The app hangs up by itself after 20 minutes without a
+Muting is for the audio cable, where listening means the input stays open. With the mic on USB the input is already
+closed between squeezes, so there is no mute button, a double tap does nothing, and a squeeze always works.
+
+English and Spanish are both recognized, chosen per message. The app mutes itself after 20 minutes without a
 squeeze, which is when the mic turns itself off too. A small toast slides down from the top of the screen while you squeeze, showing "Listening", a level
 meter and the live transcript, all of it, growing downward as you talk. It switches to "Sending…" when you release and
 "Sent" with the final text when it lands, then slides away; it never takes focus.
@@ -46,7 +49,7 @@ goes out as soon as the session is idle, so it is sent right away when Claude is
 at a time, at least 10 s apart; one still waiting after 30 minutes is left in the composer as a draft. Whether a session
 is working is read from the desktop app's own session files (`latestUserFrameAt` newer than `lastTurnEdgeAt`), an
 undocumented detail that may change.
-The menu bar handset then follows the session you sent to: three pulsing dots in its corner while Claude works, a
+The menu bar mic icon then follows the session you sent to: three pulsing dots in its corner while Claude works, a
 check for two seconds when it finishes.
 
 ## How it works
@@ -102,14 +105,14 @@ open ~/Applications/FXMic.app
 ```
 
 On first launch grant Microphone when asked, then use the menu's "Grant Accessibility access…" (System Settings >
-Privacy & Security > Accessibility) so messages can go into Claude's composer. Right-click the handset for the menu:
+Privacy & Security > Accessibility) so messages can go into Claude's composer. Option-click the icon for the plain menu:
 Start/Stop listening, Input device, Target, Shake to cancel, Menu bar activity badge, Launch at login, Quit. **Where a message goes:** to the conversation on screen in Claude when you squeeze,
 including while Claude is behind other apps. "Target" in the menu can instead **pin** one of your five most recent
 conversations: every squeeze then switches Claude to it first, until you pick "Conversation on screen" again. A pin
 works only while that conversation has a row in Claude's sidebar; if it can't be shown, the words stay as a draft in
 the conversation on screen. Switching conversations while talking also leaves the words unsent. Under "Input device" pick "External Microphone"
 for the headphone-jack adapter or "USB Advanced Audio Device" for the Sabrent; picking one starts listening on it.
-Left-click the handset to hang up or pick up.
+Right-click the icon to mute or unmute.
 
 The recognizer models for en-US and es-MX are installed on first use by the app (Apple system assets). Change the
 locales with `defaults write com.miguel.fxmic locales -array en-US es-MX`.
@@ -142,9 +145,9 @@ script also prints each event on its serial console ("fxmic press", "fxmic relea
 "fxmic cancel", "fxmic tap", and "fxmic hi" about every 2 s). While those lines arrive, FXMic takes squeezes from
 there and keeps the input closed between them. The menu's "Mic open only while squeezing (USB cable)" turns this on
 or off, and the line under it says what is happening now: "closed between squeezes, over USB", "mic not on USB,
-listening for tones", or "listening for tones". With the cable in, the mic can also pick up after FXMic hung up
-(after two taps on play, or 20 minutes without a squeeze): a squeeze picks up and starts the message, a tap on play
-only picks up. Without the cable, a hung-up FXMic hears nothing, so pick up from the Mac (click the handset or the
+listening for tones", or "listening for tones". With the cable in, the mic can also unmute FXMic
+(after two taps on play, or 20 minutes without a squeeze): a squeeze unmutes and starts the message, a tap on play
+only unmutes. Without the cable, a muted FXMic hears nothing, so unmute from the Mac (right-click the icon or the
 shortcut).
 It opens the input at the squeeze (in 70 to 180 ms here) and closes it at the release, for the level meter and,
 when wanted, Apple's recognizer. With Claude's dictation the mic is open for the squeeze anyway, and with "Apple's
@@ -216,7 +219,7 @@ filtered out.
 | `tools/probe_*.py`, `tools/serial_probe.py`, `tools/repl.py` | the probes used to learn the handle, accelerometer, and boot behavior |
 
 Debug hooks, set as environment variables when launching (`open --env NAME=value ~/Applications/FXMic.app` keeps the
-app's own permissions): `FXMIC_RECORD=/path/live.wav` saves exactly what FXMic hears until it hangs up, to compare
+app's own permissions): `FXMIC_RECORD=/path/live.wav` saves exactly what FXMic hears until it mutes, to compare
 with `fxmic-cal` recording the same device; `FXMIC_REPLAY=/path/take.wav` feeds a recording through the live pipeline
 (markers, transcription, delivery) 3 s after it starts listening. The log has a "tone <name> level … snr …" line
 for every marker onset.
@@ -226,7 +229,7 @@ Debug hook: `echo "hello" > ~/.fxmic/send.txt` delivers text as if spoken. Log a
 
 ## Troubleshooting and recovery
 
-- **Nothing happens when you squeeze**: the app is idle (left-click the handset), or the input device is wrong
+- **Nothing happens when you squeeze**: the app is muted (right-click the icon), or the input device is wrong
   (right-click, "Input device": "External Microphone" for the jack adapter, "USB Advanced Audio Device" for the
   Sabrent), or the mic script is not installed (`tools/install_disk.sh install`).
 - **Speech arrives but squeezes are never detected (no "handle pressed" in the log)**: check FXMic's Mic Mode.
@@ -238,7 +241,7 @@ Debug hook: `echo "hello" > ~/.fxmic/send.txt` delivers text as if spoken. Log a
 - **No sound from the Mac after plugging the jack adapter in**: macOS moved output to the jack. System Settings >
   Sound > Output > MacBook Pro Speakers. Switching output while listening knocks the audio engine off the
   jack input; the app notices within a second and rebinds it (log lines "engine drifted" and "reconnected"). Unplugging the adapter or the mic while
-  listening hangs up; pick up again after plugging back in.
+  listening mutes; unmute again after plugging back in.
 - **Messages arrive as system notes instead of your bubbles**: Accessibility is not granted, or the Claude window is
   closed. Check `~/.fxmic/fxmic.log` for "composer delivery failed".
 - **False cancels or shakes not registering**: the shake rule needs three alternating swings of about 0.4 g within 550 ms, and it can be switched off in the menu. Tune
