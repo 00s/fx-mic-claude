@@ -106,6 +106,13 @@ final class AppController {
     /// The squeeze in progress, if any: results of earlier squeezes do not touch its Listening bar (main).
     private var activeSqueeze: Int?
     private var lastSpeechAt = Date.distantPast        // pipeline
+    /// For the missed-release rule: this squeeze's noise floor and the current run of frames clearly above it. A
+    /// single frame over the speech threshold is not speech: room and handling noise near -70 dB kept a squeeze
+    /// with a missed release tone open for minutes.
+    private var squeezeFloorDb: Float = 0               // pipeline
+    private var aboveFloorRun = 0                       // pipeline
+    static let speechOverFloorDb: Float = 12
+    static let speechRunFrames = 20                     // 200 ms
     private var utteranceSerial = 0
     private var lastLevelPush = Date.distantPast
     private var meterLevel: Float = -60
@@ -386,8 +393,10 @@ final class AppController {
     }
 
     /// Keeps speech peaks between -20 and -4 dBFS by nudging the Sabrent's own input gain.
+    /// Not in Claude mode: Claude's dictation runs its own auto gain on the same hardware setting while it listens, and
+    /// two controllers left each capture starting at whatever gain the last one set.
     private func autoTrim(peakDb: Float) {
-        guard settings.autoGain, let device = capture?.device, let current = AudioDevices.inputVolume(device.id) else { return }
+        guard settings.autoGain, settings.transcriptionEngine != "claude", let device = capture?.device, let current = AudioDevices.inputVolume(device.id) else { return }
         var next = current
         if peakDb > -2 { next = current * 0.7 }
         else if peakDb > -4 { next = current * 0.85 }
@@ -484,8 +493,14 @@ final class AppController {
             openFrames += 1
             if !toneActive, rms > gate.config.openDb {
                 speechFrames += 1
-                lastSpeechAt = Date()
                 utterancePeak = max(utterancePeak, Levels.peakDb(frame))
+            }
+            if !toneActive {
+                // The floor follows quiet frames down at once and creeps up 1 dB/s, so pauses between words keep it
+                // at the room's level. Speech is 200 ms in a row well above it, and above the speech threshold.
+                squeezeFloorDb = rms < squeezeFloorDb ? rms : min(squeezeFloorDb + 0.01, rms)
+                aboveFloorRun = rms > max(gate.config.openDb, squeezeFloorDb + Self.speechOverFloorDb) ? aboveFloorRun + 1 : 0
+                if aboveFloorRun >= Self.speechRunFrames { lastSpeechAt = Date() }
             }
             // Warn only after 3 s of voice that has stayed faint. Pauses don't count, so thinking in silence never
             // warns; one loud enough word clears it.
@@ -507,7 +522,8 @@ final class AppController {
         // After this long without speech the squeeze ends as a draft: nothing is sent that was not released.
         let limit = settings.stuckSqueezeSeconds
         if handleMode, limit > 0, Date().timeIntervalSince(max(lastSpeechAt, squeezeStartedAt)) > limit {
-            Log.write(String(format: "no speech for %.0f s and no release heard: ending the squeeze as a draft", limit))
+            Log.write(String(format: "no speech for %.0f s and no release heard: ending the squeeze as a draft (noise floor %.0f dB)",
+                             limit, squeezeFloorDb))
             setIntent(.draft)
             squeezeEnded()
         }
@@ -674,6 +690,8 @@ final class AppController {
         lastActivity = Date()
         squeezeStartedAt = Date()
         lastSpeechAt = .distantPast
+        squeezeFloorDb = 0                 // the first frame sets it
+        aboveFloorRun = 0
         if usbLive { preroll = []; gate = makeGate() }
         if !gate.isOpen { beginUtterance() }
         handleMode = true
