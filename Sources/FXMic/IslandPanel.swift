@@ -314,6 +314,9 @@ struct PanelView: View {
                     idleDestination: off ? nil : model.selected ?? model.onScreen ?? "Conversation on screen",
                     onUnpin: { model.select(nil) },
                     showsPin: model.page != .pick,
+                    destinations: (model.pins, model.pickable),
+                    onDestination: { model.select($0) },
+                    onDestinationMenu: { if model.pickable == nil { model.loadPickable() } },
                     fixed: AnyView(HStack(spacing: 8) {
                         switcher(.pick, "Chats", nil, ink)
                         switcher(.gestures, "Gestures", "hand.point.up.left", ink)
@@ -647,6 +650,7 @@ final class IslandPanelController: NSObject {
     private func open(under button: NSStatusBarButton) {
         model.page = .main
         model.reload()
+        model.loadPickable()                // for the island's "Send to" menu
         controller.live.state = controller.state
         controller.live.usb = controller.usbLiveMain
         let p = KeyablePanel(contentRect: NSRect(x: 0, y: 0, width: Self.windowWidth, height: 400),

@@ -50,6 +50,9 @@ final class AppController {
     private var claudeSqueeze = false
     /// Claude is listening for the squeeze in progress, so its composer text drives the Listening bar (main).
     private var claudeLive = false
+    /// Squeezes in which Claude's dictation already wrote something (main). In Claude mode that, not this app's own
+    /// level, says whether the release has anything to send: handle noise can pass for speech here.
+    private var claudeWroteDuring = Set<Int>()
     /// The session each Claude-dictated squeeze was spoken into; its text is delivered there (main).
     private var dictatedSession: [Int: String] = [:]
     private(set) var recent: [(date: Date, text: String, outcome: String)] = []
@@ -167,8 +170,22 @@ final class AppController {
             self.pipeline.async { self.usbEvent(event) }
         }
         if settings.usbTrigger { usb.start() }
+        // The squeeze rail, clicked while squeezing: the same choices as the mic's buttons and the shake.
+        hud.model.onSqueezePick = { [weak self] index in
+            guard let self else { return }
+            self.pipeline.async {
+                guard self.handleMode else { return }
+                switch index {
+                case 0: self.setIntent(.send, source: "rail")
+                case 1: self.setIntent(.queue, source: "rail")
+                case 2: self.setIntent(.draft, source: "rail")
+                default: self.shakeCancel(source: "rail")
+                }
+            }
+        }
         dictation.onPartial = { [weak self] text in
             guard let self, self.claudeLive, !text.isEmpty else { return }
+            if let serial = self.activeSqueeze { self.claudeWroteDuring.insert(serial) }
             self.hud.partial(text)
         }
     }
@@ -624,6 +641,7 @@ final class AppController {
             DispatchQueue.main.async {
                 if self.activeSqueeze == serial { self.activeSqueeze = nil }
                 self.canceledSerials.remove(serial)
+                self.claudeWroteDuring.remove(serial)
                 self.intents[serial] = nil
             }
             return
@@ -636,6 +654,7 @@ final class AppController {
         DispatchQueue.main.async {
             self.pendingDeliveries += 1
             if self.activeSqueeze == serial { self.activeSqueeze = nil }
+            let heard = viaClaude ? self.claudeWroteDuring.remove(serial) != nil : hadSpeech
             if self.canceledSerials.contains(serial) { return }
             let label: String
             switch weak ? .draft : self.intents[serial] ?? .send {
@@ -643,7 +662,7 @@ final class AppController {
             case .queue: label = "Queueing…"
             case .send: label = "Sending…"
             }
-            if hadSpeech { self.hud.sending(weak ? "Weak signal, keeping a draft…" : label) } else { self.hud.hide(after: 0.15) }
+            if heard { self.hud.sending(weak ? "Weak signal, keeping a draft…" : label) } else { self.hud.finishing() }
         }
         Task.detached { [self] in
             // Claude's dictation and Apple's recognizer finish side by side; Claude's text wins, Apple's is the fallback.
@@ -712,10 +731,10 @@ final class AppController {
         if usbLive { DispatchQueue.main.async { self.closeInputBetweenSqueezes() } }
     }
 
-    private func shakeCancel() {
+    private func shakeCancel(source: String = "shake") {
         guard settings.shakeToCancel else { return }
         DispatchQueue.main.async { self.live.shake() }
-        Log.write("shake: cancel")
+        Log.write("\(source): cancel")
         let serial = utteranceSerial
         canceled = true
         // Cancel takes effect now, not at the release: Claude stops listening and the composer goes back as it was.
@@ -937,7 +956,10 @@ final class AppController {
         guard letters >= 2, inComposer || speechSeconds >= 0.4, result.confidence >= 0.35 else {
             Log.write(String(format: "dropped: %@ (%.1fs speech, conf %.2f)", Log.text(text), speechSeconds, result.confidence))
             if inComposer { dictation.complete(serial: serial, action: .discard) { _ in } }
-            if activeSqueeze == nil { if weak { warnWeakSignal("Nothing was heard clearly.") } else { hud.hide(after: 0.2) } }
+            if activeSqueeze == nil {
+                if weak { warnWeakSignal("Nothing was heard clearly.") }
+                else { hud.flash("Nothing to send", tint: .gray, icon: "waveform.slash", seconds: 1.4) }
+            }
             return
         }
         let chosen = intents.removeValue(forKey: serial) ?? .send
@@ -1080,13 +1102,18 @@ final class AppController {
     }
 
     /// Records the queue/draft choice for the squeeze in progress and shows it in the Listening bar. Capture queue.
-    private func setIntent(_ intent: Intent) {
-        DispatchQueue.main.async { self.live.press(intent == .queue ? 0 : 1) }
+    /// `source` "mic" for the mic's buttons, "rail" for a click on the island; only a click can go back to send.
+    private func setIntent(_ intent: Intent, source: String = "mic") {
         let serial = utteranceSerial
-        Log.write("during squeeze: \(intent == .queue ? "top (FX) button: queue" : "middle (sample) button: draft")")
+        if source == "mic" {
+            DispatchQueue.main.async { self.live.press(intent == .queue ? 0 : 1) }
+            Log.write("during squeeze: \(intent == .queue ? "top (FX) button: queue" : "middle (sample) button: draft")")
+        } else {
+            Log.write("during squeeze: rail: \(intent.rawValue)")
+        }
         DispatchQueue.main.async {
             self.intents[serial] = intent
-            self.hud.mode(intent == .queue ? "Queue" : "Draft")
+            self.hud.mode(intent == .queue ? "Queue" : intent == .draft ? "Draft" : nil)
         }
     }
 

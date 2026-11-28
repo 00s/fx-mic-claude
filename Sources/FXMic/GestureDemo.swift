@@ -340,11 +340,14 @@ struct DemoScene: View {
         let fill = words ?? min(1, spoken / 2.2)
         let sentAt = gesture == .send || gesture == .queue ? reached("Let go", over: 0.6) : nil
         let gone = gesture == .cancel ? reached("Shake", over: 0.9) : nil
-        let chunks: [Double] = [16, 24, 12, 20, 28, 14]
-        let total = chunks.reduce(0, +) + Double(chunks.count - 1) * 4
-        // Where the message sits: in the composer, on its way, or in the thread.
+        // The words end before the button at the composer's right end (send, clock or draft, centered at 149).
+        let chunks: [Double] = [14, 20, 10, 17, 24, 12]
+        let gap = 3.0
+        let total = chunks.reduce(0, +) + Double(chunks.count - 1) * gap
+        // Where the message sits: in the composer, on its way, or in the thread, right-aligned with your other
+        // message (its edge at 158), so the bubble and the queue's clock stay inside the window.
         let move = sentAt ?? 0
-        let x0 = 22 + (156 - total - 22 - 4) * move
+        let x0 = 22 + (158 - 6 - total - 22) * move
         let y0 = 140 - (140 - 94) * move
         if move > 0 {
             let bubble = rect(x0 - 6, y0 - 3, total + 12, 14, 7)
@@ -361,7 +364,7 @@ struct DemoScene: View {
             if visible > 0 {
                 g.fill(rect(x, y0, c * visible, 8, 4), with: .color(ink.secondary.opacity((1 - (gone ?? 0)) * 0.8)))
             }
-            x += c + 4
+            x += c + gap
         }
         // A blinking caret until the first word.
         if fill < 0.02 && (index.map { steps[$0].squeeze } ?? listening) && Int(t * 2.5) % 2 == 0 {

@@ -45,6 +45,10 @@ final class HUDModel: ObservableObject {
     @Published var weak = false
     /// On screen: the island slides down into place when true, up and out when false.
     @Published var shown = false
+    /// A click on the squeeze rail while squeezing: 0 send, 1 queue, 2 draft, 3 cancel. Set by the controller.
+    var onSqueezePick: ((Int) -> Void)? = nil
+    /// The floating island's frame in its window, so the window takes clicks only over the island.
+    var islandFrame: CGRect = .zero
 }
 
 /// The island, one component for both places it appears: floating at the top of the screen while you squeeze, and as
@@ -67,6 +71,10 @@ struct IslandStack<Action: View>: View {
     var onUnpin: (() -> Void)? = nil
     /// Off where the pinned list is right there: one pin per conversation on screen is enough.
     var showsPin = true
+    /// Between messages, in the panel: the "Send to" line opens a menu of conversations. Nil keeps it a plain line.
+    var destinations: (pins: [String], recent: [String]?)? = nil
+    var onDestination: ((String?) -> Void)? = nil
+    var onDestinationMenu: (() -> Void)? = nil
     /// Placed under the words (the panel's page buttons): the words always read above the controls.
     var fixed: AnyView? = nil
     /// The panel's gestures page keeps the squeeze rail on screen all the time; between squeezes a tap picks which gesture the drawing plays.
@@ -150,7 +158,7 @@ struct IslandStack<Action: View>: View {
                 if active && model.loading {
                     ProgressView().controlSize(.small)
                 } else if idle?.live == true {
-                    MicButtonGlyph(pressed: MicButtonGlyph.squeeze, line: ink.secondary)
+                    MicButtonGlyph(pressed: MicButtonGlyph.none, line: ink.secondary)
                 } else {
                     Image(systemName: idle?.icon ?? statusIcon).font(.system(size: 20, weight: .medium)).foregroundStyle(tint)
                 }
@@ -195,12 +203,46 @@ struct IslandStack<Action: View>: View {
             .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { wordsMeasured = $0 }
     }
 
+    /// The conversation name opens the same choices as the Chats page: the one on screen, the pins, then the rest.
+    private func destinationMenu(_ list: (pins: [String], recent: [String]?), _ pick: @escaping (String?) -> Void,
+                                 _ ink: Ink) -> some View {
+        Menu {
+            Button("Conversation on screen") { pick(nil) }
+            if !list.pins.isEmpty {
+                Divider()
+                ForEach(list.pins, id: \.self) { chat in Button(chat) { pick(chat) } }
+            }
+            if let recent = list.recent {
+                let rest = recent.filter { !list.pins.contains($0) }.prefix(12)
+                if !rest.isEmpty {
+                    Divider()
+                    ForEach(Array(rest), id: \.self) { chat in Button(chat) { pick(chat) } }
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(destination).foregroundStyle(ink.primary).lineLimit(1).truncationMode(.tail)
+                Image(systemName: "chevron.up.chevron.down").font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(ink.secondary)
+            }
+            .contentShape(Rectangle())
+        }
+        .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+        .simultaneousGesture(TapGesture().onEnded { onDestinationMenu?() })
+        .accessibilityLabel("Send to \(destination)")
+        .accessibilityHint("Picks the conversation")
+    }
+
     private func transcript(_ ink: Ink) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             if hasDestination {
                 HStack(spacing: 6) {
                     Text("Send to")
-                    Text(destination).foregroundStyle(ink.primary).lineLimit(1).truncationMode(.tail)
+                    if idle != nil, let destinations, let onDestination {
+                        destinationMenu(destinations, onDestination, ink)
+                    } else {
+                        Text(destination).foregroundStyle(ink.primary).lineLimit(1).truncationMode(.tail)
+                    }
                     Spacer(minLength: 4)
                     if showsPin && Settings.shared.targetSessionTitle != nil {
                         // One control says both things: it's pinned (the pin) and a click unpins (on hover).
@@ -241,7 +283,7 @@ struct IslandStack<Action: View>: View {
         if Settings.shared.shakeToCancel {
             items.append(RailItem("Shake to\ncancel") { MovingGlyph(kind: .shake, line: ink.secondary) })
         }
-        return ActionRail(items: items, selected: chosen, onPick: squeezing ? nil : onPick)
+        return ActionRail(items: items, selected: chosen, onPick: squeezing ? model.onSqueezePick : onPick)
             .opacity(model.title == "Starting…" ? 0.45 : 1)
     }
 
@@ -401,6 +443,7 @@ struct HUDCanvas: View {
     @ObservedObject var model: HUDModel
     var body: some View {
         IslandStack(model: model) { EmptyView() }
+            .onGeometryChange(for: CGRect.self, of: { $0.frame(in: .global) }) { model.islandFrame = $0 }
             .offset(y: model.shown ? 0 : -12)
             .opacity(model.shown ? 1 : 0)
             .padding(.top, 10)
@@ -607,6 +650,11 @@ extension Font {
     static func mono(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font { .custom("JetBrains Mono", fixedSize: size).weight(weight) }
 }
 
+/// The island never takes focus, so its first click must act instead of only bringing the window forward.
+final class FirstClickHostingView<Content: View>: NSHostingView<Content> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
 final class HUDPanel: NSPanel {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
@@ -620,6 +668,9 @@ final class HUDController {
     private var lastPartial = ""
     private var target = ""
     private var suppressPartials = false
+    /// While the island is on screen: the window takes clicks only with the pointer over the island, so the rail can
+    /// be clicked and the rest of the screen under the transparent canvas still can.
+    private var hoverTimer: Timer?
     /// The panel is open and shows the island's state itself: the floating island stays away.
     private var embedded = false
 
@@ -638,7 +689,20 @@ final class HUDController {
         panel.hidesOnDeactivate = false
         panel.isReleasedWhenClosed = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
-        panel.contentView = NSHostingView(rootView: HUDCanvas(model: model))
+        panel.contentView = FirstClickHostingView(rootView: HUDCanvas(model: model))
+        hoverTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in self?.followPointer() }
+    }
+
+    private func followPointer() {
+        guard panel.isVisible, model.shown, let content = panel.contentView else {
+            if !panel.ignoresMouseEvents { panel.ignoresMouseEvents = true }
+            return
+        }
+        // SwiftUI's global frame is top-left origin in the content view; the window wants bottom-left.
+        let f = model.islandFrame
+        let inWindow = NSRect(x: f.minX, y: content.bounds.height - f.maxY, width: f.width, height: f.height)
+        let over = panel.convertToScreen(inWindow).contains(NSEvent.mouseLocation)
+        if panel.ignoresMouseEvents == over { panel.ignoresMouseEvents = !over }
     }
 
     /// The canvas: wide enough for the wide island and its shadow, tall enough for a long transcript, its top at the
@@ -735,11 +799,23 @@ final class HUDController {
     }
 
     /// Queue or draft chosen with a mic button during the squeeze: the highlighted pill moves; nothing else changes.
-    func mode(_ label: String) {
+    func mode(_ label: String?) {
         model.intent = label
     }
 
     /// The message is being finalized: "Sending…", "Adding to draft…" or "Queueing…".
+    /// Released with no speech heard here: the island stays, spinning, until the text (or "Nothing to send") takes
+    /// its place, so it never disappears and comes back.
+    func finishing() {
+        model.loading = true
+        model.title = "Finishing…"
+        model.tint = .gray
+        model.showMeter = false
+        model.level = -60
+        show()
+        hide(after: 6)                         // watchdog in case nothing reports back
+    }
+
     func sending(_ label: String = "Sending…") {
         model.loading = false
         model.title = label
