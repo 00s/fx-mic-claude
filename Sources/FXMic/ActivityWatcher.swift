@@ -2,8 +2,8 @@ import AppKit
 import ApplicationServices
 import Foundation
 
-/// Watches a Claude session's sidebar label after a message was sent: "Running <title>" means Claude picked it up,
-/// back to "Idle <title>" means the turn finished. Drives the "Thinking" and "Done" toasts.
+/// Watches a Claude session after a message was sent: running means Claude picked it up, idle again means the turn
+/// finished. Drives the dots and the check on the menu bar icon.
 final class ActivityWatcher {
     enum SessionState { case running, idle, unknown }
 
@@ -33,7 +33,7 @@ final class ActivityWatcher {
                 } else if Date().timeIntervalSince(start) > 3600 {
                     return
                 }
-                Thread.sleep(forTimeInterval: sawRunning ? 0.7 : 0.35)
+                Thread.sleep(forTimeInterval: sawRunning ? 1.0 : 0.5)
             }
         }
         t.qualityOfService = .utility
@@ -43,27 +43,17 @@ final class ActivityWatcher {
 
     func cancel() { generation += 1; thread?.cancel(); thread = nil }
 
+    /// From the session's own file (what queued messages already wait on), which doesn't care how the sidebar looks.
+    /// For a conversation without one, its sidebar row, whose label says "Running" while Claude works.
     static func state(of title: String) -> SessionState {
+        if let running = SessionStore.isRunning(title: title) { return running ? .running : .idle }
         guard AXIsProcessTrusted(), let app = ClaudeApp.running else { return .unknown }
         let axApp = AXUIElementCreateApplication(app.processIdentifier)
-        var windowsRef: AnyObject?
-        guard AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &windowsRef) == .success,
-              let windows = windowsRef as? [AXUIElement], let win = windows.first else { return .unknown }
-        var result = SessionState.unknown
-        func walk(_ el: AXUIElement, _ depth: Int) {
-            if result != .unknown || depth > 80 { return }
-            var roleRef: AnyObject?; AXUIElementCopyAttributeValue(el, kAXRoleAttribute as CFString, &roleRef)
-            if roleRef as? String == "AXButton" {
-                var titleRef: AnyObject?; AXUIElementCopyAttributeValue(el, kAXTitleAttribute as CFString, &titleRef)
-                if let t = titleRef as? String, t.hasSuffix(title) {
-                    if t.hasPrefix("Running ") { result = .running; return }
-                    if t.hasPrefix("Idle ") { result = .idle; return }
-                }
-            }
-            var kidsRef: AnyObject?; AXUIElementCopyAttributeValue(el, kAXChildrenAttribute as CFString, &kidsRef)
-            for k in (kidsRef as? [AXUIElement]) ?? [] { walk(k, depth + 1); if result != .unknown { return } }
-        }
-        walk(win, 0)
-        return result
+        let windows = (ComposerDelivery.attribute(axApp, kAXWindowsAttribute) as? [AXUIElement]) ?? []
+        guard let window = windows.first, let row = ComposerDelivery.sidebarRows(titled: title, in: window).first
+        else { return .unknown }
+        let labels = [kAXTitleAttribute, kAXDescriptionAttribute].map { ComposerDelivery.string(row, $0) }
+        let running = labels.contains { $0.hasPrefix("Running ") || $0.hasPrefix("\(title) Running") }
+        return running ? .running : .idle
     }
 }

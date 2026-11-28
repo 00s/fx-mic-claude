@@ -24,6 +24,7 @@ final class Settings {
             "fastLiveText": false,
             "livePreview": true,
             "autoGain": true,
+            "weakSignalDb": -26.0,
             "composerDelivery": true,
             "transcriptionEngine": "apple",
             "dictationButtonLabels": ["hold to record", "dictat"],
@@ -72,6 +73,9 @@ final class Settings {
     /// better with +20 dB: on recordings peaking at -36 to -43 dBFS, confidence rose from 0.75-0.79 to 0.87-0.88
     /// on the weaker sentences.
     var transcriberGainDb: Float { get { Float(d.double(forKey: "transcriberGainDb")) } set { d.set(Double(newValue), forKey: "transcriberGainDb") } }
+    /// A squeeze whose voice peaks below this (dBFS) is never sent or queued, only kept as a draft: dictation guesses
+    /// words from a faint signal (low mic batteries, a half-seated plug). -160 turns the check off.
+    var weakSignalDb: Float { Float(d.double(forKey: "weakSignalDb")) }
     var autoGain: Bool { get { d.bool(forKey: "autoGain") } set { d.set(newValue, forKey: "autoGain") } }
     var iconIdle: String { d.string(forKey: "iconIdle") ?? "phone.down.fill" }
     var iconArmed: String { d.string(forKey: "iconArmed") ?? "phone.fill" }

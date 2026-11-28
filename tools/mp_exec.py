@@ -7,7 +7,7 @@ def open_port():
     ports = sorted(glob.glob("/dev/cu.usbmodem*"))
     port = next((p for p in ports if "EP" in p), ports[0] if ports else None)
     if not port: sys.exit("no EP-2350 serial port: is the mic on and connected with a USB-C data cable?")
-    busy = f"{port} is busy: FXMic watches the mic's USB console for squeezes. Quit FXMic first."
+    busy = f"{port} is busy: Squeeze watches the mic's USB console for squeezes. Quit Squeeze first."
     try:
         fd = os.open(port, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
     except OSError as e:

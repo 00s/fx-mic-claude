@@ -1,6 +1,6 @@
-# fx-mic-claude
+# Squeeze
 
-Push-to-talk into Claude with a Teenage Engineering EP-2350 FX mic. Squeeze the handle from any app, talk, release,
+Squeeze (formerly FXMic) is push-to-talk into Claude with a Teenage Engineering EP-2350 FX mic. Squeeze the handle from any app, talk, release,
 and your words land in the Claude desktop app as your own message. No cable to the mic, no hotkeys, no waiting for a
 pause. A menu bar app on the Mac does the listening and transcription; a small script on the mic's own disk turns the
 handle and a shake into marker tones that ride the audio line.
@@ -23,7 +23,7 @@ patch goes.
 | shake the mic hard while squeezing | the message is canceled, nothing is sent |
 | press the top (FX) button while squeezing | queue: the message waits until the Claude session finishes its turn, then is sent |
 | press the middle (sample) button while squeezing | draft: the message is added to the composer, after any text already there, and not sent |
-| tap the bottom (play) button, handle released | opens or closes the FXMic panel; change it under Settings, "Bottom button" (bring Claude forward, show or hide Claude, or nothing) |
+| tap the bottom (play) button, handle released | opens or closes the Squeeze panel; change it under Settings, "Bottom button" (bring Claude forward, show or hide Claude, or nothing) |
 | two quick taps on the bottom (play) button, handle released | the app mutes (stops listening, orange dot off) |
 | click the menu bar mic icon | the panel: live state and transcript, where messages go, mic gestures, settings |
 | right-click the menu bar mic icon | mute or unmute (Option-click: a plain menu) |
@@ -40,7 +40,7 @@ panel shows the same thing instead. It switches to "Sending…" when you release
 "Sent" with the final text when it lands, then slides away; it never takes focus.
 The live text comes from a second, faster recognizer: first words about 1 s after you start talking, then about once a
 second. The sent text still comes from the accurate recognizer. Settings (`defaults write com.miguel.fxmic …`, then
-restart FXMic): `hudTranscript -bool false` hides the text, `livePreview -bool false` drops the fast recognizer (live
+restart Squeeze): `hudTranscript -bool false` hides the text, `livePreview -bool false` drops the fast recognizer (live
 text then arrives in bursts a few seconds late), `fastLiveText -bool true` makes every recognizer fast, the sent text
 included, at some cost in accuracy.
 
@@ -65,7 +65,7 @@ disk at boot in place of the built-in startup. So:
    reads the handle position and the accelerometer, and plays short sample tones: 17 + 18.5 kHz when the handle passes
    half travel, 14 + 15 kHz when it is released, 12 + 13 kHz when the mic is shaken hard while squeezed. The play
    button plays a 15.5 + 16.5 kHz chirp. All four are one-shot samples on the mic's four sample slots.
-2. **On the Mac** (`Sources/`): the FXMic menu bar app taps the audio input device by its identifier (the Sabrent, not
+2. **On the Mac** (`Sources/`): the Squeeze menu bar app taps the audio input device by its identifier (the Sabrent, not
    the system default input), detects the tones with Goertzel filters, and treats the press marker as "message
    starts" and the release marker as "message ends". Speech in between goes to Apple's on-device speech recognizer,
    two locales at once (en-US and es-MX), and the more confident transcript wins about 100 ms after release. Tones
@@ -102,8 +102,8 @@ Requires macOS 26 (Apple's SpeechAnalyzer) and the Xcode command line tools. No 
 
 ```
 tools/make_signing_identity.sh        # once: a local self-signed identity so permission grants survive rebuilds
-tools/make_app.sh                     # builds, signs, installs ~/Applications/FXMic.app
-open ~/Applications/FXMic.app
+tools/make_app.sh                     # builds, signs, installs ~/Applications/Squeeze.app
+open ~/Applications/Squeeze.app
 ```
 
 On first launch grant Microphone when asked, then use the menu's "Grant Accessibility access…" (System Settings >
@@ -142,21 +142,21 @@ start in that mode. The hold also steps the FX preset or sample once, like any p
 TE's own script gives these buttons no long-press action, and its button combinations (sample + play for recovery,
 handle + double-click for the bootloader) only apply while powering on.
 
-**Input closed between squeezes (USB cable).** The tones need the Mac's input open whenever FXMic listens, so macOS
+**Input closed between squeezes (USB cable).** The tones need the Mac's input open whenever Squeeze listens, so macOS
 shows the orange microphone dot the whole time. If the mic stays connected to the Mac with a USB-C data cable, its
 script also prints each event on its serial console ("fxmic press", "fxmic release", "fxmic queue", "fxmic draft",
-"fxmic cancel", "fxmic tap", and "fxmic hi" about every 2 s). While those lines arrive, FXMic takes squeezes from
+"fxmic cancel", "fxmic tap", and "fxmic hi" about every 2 s). While those lines arrive, Squeeze takes squeezes from
 there and keeps the input closed between them. The menu's "Mic open only while squeezing (USB cable)" turns this on
 or off, and the line under it says what is happening now: "closed between squeezes, over USB", "mic not on USB,
-listening for tones", or "listening for tones". With the cable in, the mic can also unmute FXMic
+listening for tones", or "listening for tones". With the cable in, the mic can also unmute Squeeze
 (after two taps on play, or 20 minutes without a squeeze): a squeeze unmutes and starts the message, a tap on play
-only unmutes. Without the cable, a muted FXMic hears nothing, so unmute from the Mac (right-click the icon or the
+only unmutes. Without the cable, a muted Squeeze hears nothing, so unmute from the Mac (right-click the icon or the
 shortcut).
 It opens the input at the squeeze (in 70 to 180 ms here) and closes it at the release, for the level meter and,
 when wanted, Apple's recognizer. With Claude's dictation the mic is open for the squeeze anyway, and with "Apple's
-recognizer as fallback" off FXMic only measures the level and transcribes nothing. On batteries, with a charge-only cable or with an older script, no lines arrive and FXMic goes back
-to the tones within 5 s, mid-squeeze too. The tones still play either way. FXMic only reads the port, never writes
-to it or touches its modem lines, and holds it exclusively: quit FXMic before running `tools/mp_exec.py` or
+recognizer as fallback" off Squeeze only measures the level and transcribes nothing. On batteries, with a charge-only cable or with an older script, no lines arrive and Squeeze goes back
+to the tones within 5 s, mid-squeeze too. The tones still play either way. Squeeze only reads the port, never writes
+to it or touches its modem lines, and holds it exclusively: quit Squeeze before running `tools/mp_exec.py` or
 `build_fxmic_script.py --from-device`. The setting is `usbTrigger`.
 
 Do not use `mpremote` or any pyserial-based tool on the mic's serial port: opening the port with modem-line toggling
@@ -168,10 +168,10 @@ With Accessibility granted, spoken messages go to whatever Claude view is open, 
 `/fxmic` in a Claude Code session to receive messages through the file inbox at `~/.fxmic/inbox/`; the skill is in
 `claude/skills/fxmic/SKILL.md`, copy it to `~/.claude/skills/fxmic/`.
 
-**Claude's own dictation (optional, recommended for accuracy).** By default FXMic transcribes with Apple's
+**Claude's own dictation (optional, recommended for accuracy).** By default Squeeze transcribes with Apple's
 on-device recognizer. Turn on "Transcribe with Claude's dictation" in the menu (or
 `defaults write com.miguel.fxmic transcriptionEngine claude`) and a squeeze drives the Claude app's own dictation
-instead: FXMic presses the mic control next to the composer ("Press and hold to record") through Accessibility,
+instead: Squeeze presses the mic control next to the composer ("Press and hold to record") through Accessibility,
 presses it again on release, and leaves the text where Claude wrote it, in the session it was spoken into: the middle
 (sample) button keeps it as a draft, a plain squeeze presses Send (while Claude is working that sends it as a mid-turn message; if
 Claude shows Stop instead of Send, it queues), the top (FX) button queues it in
@@ -179,7 +179,7 @@ Claude with Cmd+Return. Like dictating by hand, the words are added after any dr
 Send sends both. That is the same speech-to-text as clicking the mic in Claude, so the words come out
 the same. Apple's recognizer keeps running alongside as the fallback when dictation cannot start, and the log has
 one "compare: claude: … | apple …" line per message: word counts only, or both transcripts with
-`defaults write com.miguel.fxmic logTranscripts -bool true`. By default FXMic writes nothing you say to its log
+`defaults write com.miguel.fxmic logTranscripts -bool true`. By default Squeeze writes nothing you say to its log
 (`~/.fxmic`, readable by you only) or to the system log. Turn the fallback off with the menu's "Apple's
 recognizer as fallback" (`appleFallback`); a squeeze whose dictation fails to start is then lost. The Claude window has to show a composer
 with the mic control. Claude starts listening 0.4 to 1 s after the squeeze: until then the bar is grey with a spinner
@@ -197,11 +197,11 @@ filtered out.
 
 - Use the low-pitch markers (3.4 to 5.7 kHz, regenerate with `tools/make_marker_pack_lowband.py`):
   `tools/install_disk.sh install marker-pack-lowband`, then run the four `defaults write com.miguel.fxmic … -array …`
-  commands it prints so FXMic listens for the same pitches, and restart FXMic. `tools/install_disk.sh install` and
+  commands it prints so Squeeze listens for the same pitches, and restart Squeeze. `tools/install_disk.sh install` and
   `defaults delete` on those keys go back to the originals.
 - If the input is quiet (the "quiet, turn the volume knob up" hint with the knob already at maximum), lower the
   thresholds: `defaults write com.miguel.fxmic chirpMinLevelDb -float -85` for the markers and
-  `defaults write com.miguel.fxmic openDb -float -60` so speech still counts, then restart FXMic. The log line
+  `defaults write com.miguel.fxmic openDb -float -60` so speech still counts, then restart Squeeze. The log line
   "tone threshold … speech threshold …" shows the values in use.
 - If quiet speech is often misheard, raise the level fed to the recognizer only:
   `defaults write com.miguel.fxmic transcriberGainDb -float 20`. On recordings peaking at -36 to -43 dBFS, +20 dB raised
@@ -221,8 +221,8 @@ filtered out.
 | `tools/make_escape_uf2.py` | build the recovery UF2 that blanks the disk |
 | `tools/probe_*.py`, `tools/serial_probe.py`, `tools/repl.py` | the probes used to learn the handle, accelerometer, and boot behavior |
 
-Debug hooks, set as environment variables when launching (`open --env NAME=value ~/Applications/FXMic.app` keeps the
-app's own permissions): `FXMIC_RECORD=/path/live.wav` saves exactly what FXMic hears until it mutes, to compare
+Debug hooks, set as environment variables when launching (`open --env NAME=value ~/Applications/Squeeze.app` keeps the
+app's own permissions): `FXMIC_RECORD=/path/live.wav` saves exactly what Squeeze hears until it mutes, to compare
 with `fxmic-cal` recording the same device; `FXMIC_REPLAY=/path/take.wav` feeds a recording through the live pipeline
 (markers, transcription, delivery) 3 s after it starts listening. The log has a "tone <name> level … snr …" line
 for every marker onset.
@@ -232,13 +232,17 @@ Debug hook: `echo "hello" > ~/.fxmic/send.txt` delivers text as if spoken. Log a
 
 ## Troubleshooting and recovery
 
+- **"Mic signal weak"**: the voice arrived too faint to trust (dictation guesses words from a faint signal), so
+  nothing is sent or queued; any text stays as a draft. Replace the mic's batteries and reseat both plugs. The limit
+  is a peak of -26 dBFS; change it with `defaults write com.miguel.fxmic weakSignalDb -float -30` (-160 turns the
+  check off). Each squeeze's peak is logged ("level: voice peak …").
 - **Nothing happens when you squeeze**: the app is muted (right-click the icon), or the input device is wrong
   (panel "Settings", or Option-click the icon, "Input device": "External Microphone" for the jack adapter, "USB Advanced Audio Device" for the
   Sabrent), or the mic script is not installed (`tools/install_disk.sh install`).
-- **Speech arrives but squeezes are never detected (no "handle pressed" in the log)**: check FXMic's Mic Mode.
-  While FXMic is listening, open Control Center > Mic Mode and choose Standard. Voice Isolation keeps speech and
+- **Speech arrives but squeezes are never detected (no "handle pressed" in the log)**: check Squeeze's Mic Mode.
+  While Squeeze is listening, open Control Center > Mic Mode and choose Standard. Voice Isolation keeps speech and
   silences the marker tones a few milliseconds after they start, so nothing else looks wrong. macOS remembers the mode
-  per app; FXMic logs "mic mode: …" and warns and opens the picker when Voice Isolation is active. Also check the
+  per app; Squeeze logs "mic mode: …" and warns and opens the picker when Voice Isolation is active. Also check the
   firmware (1.1.2 or later), and that your adapter passes the 12 to 18.5 kHz tones: run
   `.build/release/fxmic-cal --device "<name>" --scan` while squeezing; no scan lines above 12 kHz means it filters them out.
 - **No sound from the Mac after plugging the jack adapter in**: macOS moved output to the jack. System Settings >

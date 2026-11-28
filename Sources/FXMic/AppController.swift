@@ -50,6 +50,9 @@ final class AppController {
     private var claudeSqueeze = false
     /// Claude is listening for the squeeze in progress, so its composer text drives the Listening bar (main).
     private var claudeLive = false
+    /// Squeezes in which Claude's dictation already wrote something (main). In Claude mode that, not this app's own
+    /// level, says whether the release has anything to send: handle noise can pass for speech here.
+    private var claudeWroteDuring = Set<Int>()
     /// The session each Claude-dictated squeeze was spoken into; its text is delivered there (main).
     private var dictatedSession: [Int: String] = [:]
     private(set) var recent: [(date: Date, text: String, outcome: String)] = []
@@ -83,6 +86,21 @@ final class AppController {
     private var speechFrames = 0
     private var openFrames = 0
     private var utterancePeak: Float = -160
+    private var heardFrames = 0                    // audio that reached us during the squeeze, loud or not
+    private var weakSerials: Set<Int> = []         // squeezes too faint to trust (main queue)
+    private var voicedFrames = 0                   // audio loud enough to be a voice, not a pause
+    private var weakNow = false                    // the island is warning during the squeeze
+
+    /// Faint enough that the words can't be trusted. Only judged on audio that actually arrived (over USB the input
+    /// may not open, and then the level says nothing); half a second of it with no speech level at all counts too.
+    /// For the warning during a squeeze: what counts as voice (above room and handling noise), and how much of it,
+    /// in 10 ms frames, must have stayed faint.
+    static let voiceFloorDb: Float = -55
+    static let faintVoiceFrames = 300
+
+    static func isWeakSignal(voicePeak: Float, heardFrames: Int, threshold: Float) -> Bool {
+        heardFrames >= 50 && voicePeak < threshold
+    }
     private var chirpDuringUtterance = false
     private var lastSpeechChirp = Date.distantPast
     private var canceled = false                     // the squeeze in progress was canceled: no meter (pipeline)
@@ -91,6 +109,13 @@ final class AppController {
     /// The squeeze in progress, if any: results of earlier squeezes do not touch its Listening bar (main).
     private var activeSqueeze: Int?
     private var lastSpeechAt = Date.distantPast        // pipeline
+    /// For the missed-release rule: this squeeze's noise floor and the current run of frames clearly above it. A
+    /// single frame over the speech threshold is not speech: room and handling noise near -70 dB kept a squeeze
+    /// with a missed release tone open for minutes.
+    private var squeezeFloorDb: Float = 0               // pipeline
+    private var aboveFloorRun = 0                       // pipeline
+    static let speechOverFloorDb: Float = 12
+    static let speechRunFrames = 20                     // 200 ms
     private var utteranceSerial = 0
     private var lastLevelPush = Date.distantPast
     private var meterLevel: Float = -60
@@ -145,8 +170,22 @@ final class AppController {
             self.pipeline.async { self.usbEvent(event) }
         }
         if settings.usbTrigger { usb.start() }
+        // The squeeze rail, clicked while squeezing: the same choices as the mic's buttons and the shake.
+        hud.model.onSqueezePick = { [weak self] index in
+            guard let self else { return }
+            self.pipeline.async {
+                guard self.handleMode else { return }
+                switch index {
+                case 0: self.setIntent(.send, source: "rail")
+                case 1: self.setIntent(.queue, source: "rail")
+                case 2: self.setIntent(.draft, source: "rail")
+                default: self.shakeCancel(source: "rail")
+                }
+            }
+        }
         dictation.onPartial = { [weak self] text in
             guard let self, self.claudeLive, !text.isEmpty else { return }
+            if let serial = self.activeSqueeze { self.claudeWroteDuring.insert(serial) }
             self.hud.partial(text)
         }
     }
@@ -371,8 +410,10 @@ final class AppController {
     }
 
     /// Keeps speech peaks between -20 and -4 dBFS by nudging the Sabrent's own input gain.
+    /// Not in Claude mode: Claude's dictation runs its own auto gain on the same hardware setting while it listens, and
+    /// two controllers left each capture starting at whatever gain the last one set.
     private func autoTrim(peakDb: Float) {
-        guard settings.autoGain, let device = capture?.device, let current = AudioDevices.inputVolume(device.id) else { return }
+        guard settings.autoGain, settings.transcriptionEngine != "claude", let device = capture?.device, let current = AudioDevices.inputVolume(device.id) else { return }
         var next = current
         if peakDb > -2 { next = current * 0.7 }
         else if peakDb > -4 { next = current * 0.85 }
@@ -464,13 +505,25 @@ final class AppController {
         }
         if !handleMode, gate.isOpen { gate.forceClose() }
 
+        if handleMode, !toneActive { heardFrames += 1 }
         if handleMode, gate.isOpen {
             openFrames += 1
             if !toneActive, rms > gate.config.openDb {
                 speechFrames += 1
-                lastSpeechAt = Date()
                 utterancePeak = max(utterancePeak, Levels.peakDb(frame))
             }
+            if !toneActive {
+                // The floor follows quiet frames down at once and creeps up 1 dB/s, so pauses between words keep it
+                // at the room's level. Speech is 200 ms in a row well above it, and above the speech threshold.
+                squeezeFloorDb = rms < squeezeFloorDb ? rms : min(squeezeFloorDb + 0.01, rms)
+                aboveFloorRun = rms > max(gate.config.openDb, squeezeFloorDb + Self.speechOverFloorDb) ? aboveFloorRun + 1 : 0
+                if aboveFloorRun >= Self.speechRunFrames { lastSpeechAt = Date() }
+            }
+            // Warn only after 3 s of voice that has stayed faint. Pauses don't count, so thinking in silence never
+            // warns; one loud enough word clears it.
+            if !toneActive, rms > Self.voiceFloorDb { voicedFrames += 1 }
+            if utterancePeak >= settings.weakSignalDb { showWeak(false) }
+            else if voicedFrames >= Self.faintVoiceFrames { showWeak(true) }
             feedTranscriber(frame)
             // No time cap: a message ends only on the release marker or a shake.
             // Meter ballistics: instant attack, about 150 dB/s release, pushed to the HUD on every 10 ms hop.
@@ -486,7 +539,8 @@ final class AppController {
         // After this long without speech the squeeze ends as a draft: nothing is sent that was not released.
         let limit = settings.stuckSqueezeSeconds
         if handleMode, limit > 0, Date().timeIntervalSince(max(lastSpeechAt, squeezeStartedAt)) > limit {
-            Log.write(String(format: "no speech for %.0f s and no release heard: ending the squeeze as a draft", limit))
+            Log.write(String(format: "no speech for %.0f s and no release heard: ending the squeeze as a draft (noise floor %.0f dB)",
+                             limit, squeezeFloorDb))
             setIntent(.draft)
             squeezeEnded()
         }
@@ -524,6 +578,9 @@ final class AppController {
         utteranceSerial += 1
         speechFrames = 0
         openFrames = 0
+        weakNow = false
+        voicedFrames = 0
+        heardFrames = 0
         utterancePeak = -160
         chirpDuringUtterance = false
         canceled = false
@@ -566,7 +623,14 @@ final class AppController {
         let speechSeconds = openFrames > 0 ? Double(speechFrames) * hopSeconds : Date().timeIntervalSince(squeezeStartedAt)
         let serial = utteranceSerial
         let hadChirp = chirpDuringUtterance
+        // Every squeeze's level (a number, no audio): a weak signal makes dictation guess words that were never said.
+        Log.write(String(format: "level: voice peak %.1f dBFS over %.1f s", utterancePeak, speechSeconds))
         if speechSeconds >= 0.5 { autoTrim(peakDb: utterancePeak) }
+        let weak = !canceled && Self.isWeakSignal(voicePeak: utterancePeak, heardFrames: heardFrames, threshold: settings.weakSignalDb)
+        if weak {
+            Log.write("weak signal: this squeeze will not be sent or queued")
+            DispatchQueue.main.async { self.weakSerials.insert(serial) }
+        }
         state = .armed
         let viaClaude = claudeSqueeze
         claudeSqueeze = false
@@ -577,6 +641,7 @@ final class AppController {
             DispatchQueue.main.async {
                 if self.activeSqueeze == serial { self.activeSqueeze = nil }
                 self.canceledSerials.remove(serial)
+                self.claudeWroteDuring.remove(serial)
                 self.intents[serial] = nil
             }
             return
@@ -589,14 +654,15 @@ final class AppController {
         DispatchQueue.main.async {
             self.pendingDeliveries += 1
             if self.activeSqueeze == serial { self.activeSqueeze = nil }
+            let heard = viaClaude ? self.claudeWroteDuring.remove(serial) != nil : hadSpeech
             if self.canceledSerials.contains(serial) { return }
             let label: String
-            switch self.intents[serial] ?? .send {
+            switch weak ? .draft : self.intents[serial] ?? .send {
             case .draft: label = "Adding to draft…"
             case .queue: label = "Queueing…"
             case .send: label = "Sending…"
             }
-            if hadSpeech { self.hud.sending(label) } else { self.hud.hide(after: 0.15) }
+            if heard { self.hud.sending(weak ? "Weak signal, keeping a draft…" : label) } else { self.hud.finishing() }
         }
         Task.detached { [self] in
             // Claude's dictation and Apple's recognizer finish side by side; Claude's text wins, Apple's is the fallback.
@@ -643,6 +709,8 @@ final class AppController {
         lastActivity = Date()
         squeezeStartedAt = Date()
         lastSpeechAt = .distantPast
+        squeezeFloorDb = 0                 // the first frame sets it
+        aboveFloorRun = 0
         if usbLive { preroll = []; gate = makeGate() }
         if !gate.isOpen { beginUtterance() }
         handleMode = true
@@ -663,10 +731,10 @@ final class AppController {
         if usbLive { DispatchQueue.main.async { self.closeInputBetweenSqueezes() } }
     }
 
-    private func shakeCancel() {
+    private func shakeCancel(source: String = "shake") {
         guard settings.shakeToCancel else { return }
         DispatchQueue.main.async { self.live.shake() }
-        Log.write("shake: cancel")
+        Log.write("\(source): cancel")
         let serial = utteranceSerial
         canceled = true
         // Cancel takes effect now, not at the release: Claude stops listening and the composer goes back as it was.
@@ -865,6 +933,7 @@ final class AppController {
         // Text dictated in Claude goes back to the session it was spoken into.
         let dictatedIn = dictatedSession.removeValue(forKey: serial)
         let inComposer = result.locale == "claude"      // Claude's dictation left this text in the composer
+        let weak = weakSerials.remove(serial) != nil
         if result.locale == "switched" {
             canceledSerials.remove(serial)
             intents.removeValue(forKey: serial)
@@ -887,12 +956,16 @@ final class AppController {
         guard letters >= 2, inComposer || speechSeconds >= 0.4, result.confidence >= 0.35 else {
             Log.write(String(format: "dropped: %@ (%.1fs speech, conf %.2f)", Log.text(text), speechSeconds, result.confidence))
             if inComposer { dictation.complete(serial: serial, action: .discard) { _ in } }
-            if activeSqueeze == nil { hud.hide(after: 0.2) }
+            if activeSqueeze == nil {
+                if weak { warnWeakSignal("Nothing was heard clearly.") }
+                else { hud.flash("Nothing to send", tint: .gray, icon: "waveform.slash", seconds: 1.4) }
+            }
             return
         }
-        let intent = intents.removeValue(forKey: serial) ?? .send
+        let chosen = intents.removeValue(forKey: serial) ?? .send
+        let intent: Intent = weak ? .draft : chosen            // faint words are never sent or queued
         if inComposer {
-            deliverInComposer(text, intent: intent, session: dictatedIn, serial: serial, speechSeconds: speechSeconds)
+            deliverInComposer(text, intent: intent, session: dictatedIn, serial: serial, speechSeconds: speechSeconds, weak: weak)
             return
         }
         let outcome: String
@@ -936,6 +1009,9 @@ final class AppController {
                 Log.write("composer delivery failed (\(error)), using the inbox")
                 outcome = inboxOutcome(text: text, result: result, speechSeconds: speechSeconds)
             }
+        } else if weak {
+            copiedToClipboard(text, why: "The mic signal was weak, so it wasn't sent")
+            outcome = "Weak signal, copied"
         } else {
             outcome = inboxOutcome(text: text, result: result, speechSeconds: speechSeconds)
         }
@@ -944,14 +1020,16 @@ final class AppController {
         if recent.count > 12 { recent.removeLast() }
         lastActivity = Date()
         // A copied message already has its notice up; "Sent" would be wrong.
-        if activeSqueeze == nil, !outcome.lowercased().contains("copied") { hud.sent(text, outcome: outcome, title: hudTitle) }
+        if activeSqueeze == nil, !outcome.lowercased().contains("copied") {
+            if weak { warnWeakSignal("Left as a draft, not sent.") } else { hud.sent(text, outcome: outcome, title: hudTitle) }
+        }
         onRecentChange?()
     }
 
     /// Text Claude's dictation already put in the composer stays there: white leaves it as a draft, a plain squeeze
     /// presses Send, orange queues it in Claude (Cmd+Return). Nothing is cleared and typed again. If sending or
     /// queueing fails, the composer is put back as it was and the text goes to FXMic's own queue or the inbox.
-    private func deliverInComposer(_ text: String, intent: Intent, session: String?, serial: Int, speechSeconds: Double) {
+    private func deliverInComposer(_ text: String, intent: Intent, session: String?, serial: Int, speechSeconds: Double, weak: Bool) {
         let action: ClaudeDictation.Action = intent == .draft ? .keep : intent == .queue ? .queue : .send
         let target = session                 // where it was dictated; nil when that conversation has no readable title
         dictation.complete(serial: serial, action: action) { [weak self] result in
@@ -977,9 +1055,13 @@ final class AppController {
             case .success(.discarded):
                 return
             case .failure(let error):
-                if let target {
+                // What was meant as a draft (chosen, or too faint to trust) is never queued, which would send it later.
+                if intent == .draft {
+                    self.copiedToClipboard(text, why: "The draft couldn't be left in Claude")
+                    outcome = "Draft failed (\(error)), copied"
+                } else if let target {
                     self.queued.append((text, target, Date()))
-                    outcome = "Claude did not take it (\(error)), queued in FXMic for \(target)"; title = "Queued"
+                    outcome = "Claude did not take it (\(error)), queued in \(AppName.display) for \(target)"; title = "Queued"
                     self.startQueue()
                 } else {
                     outcome = self.inboxOutcome(text: text, result: UtteranceResult(text: text, locale: "claude", confidence: 1, alternatives: []), speechSeconds: speechSeconds)
@@ -989,9 +1071,24 @@ final class AppController {
             self.recent.insert((Date(), text, outcome), at: 0)
             if self.recent.count > 12 { self.recent.removeLast() }
             self.lastActivity = Date()
-            if self.activeSqueeze == nil, !outcome.lowercased().contains("copied") { self.hud.sent(text, outcome: outcome, title: title) }
+            if self.activeSqueeze == nil, !outcome.lowercased().contains("copied") {
+                if weak { self.warnWeakSignal("Left as a draft, not sent.") } else { self.hud.sent(text, outcome: outcome, title: title) }
+            }
             self.onRecentChange?()
         }
+    }
+
+    /// Capture queue. Only changes what the island says; whether the words are sent is decided at the release.
+    private func showWeak(_ on: Bool) {
+        guard on != weakNow else { return }
+        weakNow = on
+        if on { Log.write("weak signal: warning during the squeeze") }
+        DispatchQueue.main.async { self.hud.model.weak = on }
+    }
+
+    private func warnWeakSignal(_ what: String) {
+        hud.flash("Mic signal weak", detail: "\(what) Check the mic's batteries and plugs.", tint: .orange,
+                  icon: "waveform.badge.exclamationmark", seconds: 5)
     }
 
     private func watchActivity(_ target: String) {
@@ -1005,13 +1102,18 @@ final class AppController {
     }
 
     /// Records the queue/draft choice for the squeeze in progress and shows it in the Listening bar. Capture queue.
-    private func setIntent(_ intent: Intent) {
-        DispatchQueue.main.async { self.live.press(intent == .queue ? 0 : 1) }
+    /// `source` "mic" for the mic's buttons, "rail" for a click on the island; only a click can go back to send.
+    private func setIntent(_ intent: Intent, source: String = "mic") {
         let serial = utteranceSerial
-        Log.write("during squeeze: \(intent == .queue ? "top (FX) button: queue" : "middle (sample) button: draft")")
+        if source == "mic" {
+            DispatchQueue.main.async { self.live.press(intent == .queue ? 0 : 1) }
+            Log.write("during squeeze: \(intent == .queue ? "top (FX) button: queue" : "middle (sample) button: draft")")
+        } else {
+            Log.write("during squeeze: rail: \(intent.rawValue)")
+        }
         DispatchQueue.main.async {
             self.intents[serial] = intent
-            self.hud.mode(intent == .queue ? "Queue" : "Draft")
+            self.hud.mode(intent == .queue ? "Queue" : intent == .draft ? "Draft" : nil)
         }
     }
 

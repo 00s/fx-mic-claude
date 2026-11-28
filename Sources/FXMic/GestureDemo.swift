@@ -66,7 +66,7 @@ extension MicGesture {
 
 /// The mic as drawn in the reference, acting out the chosen gesture beside a lo-fi sketch of what it does on the Mac:
 /// the words filling Claude's composer and leaving, the panel dropping from the menu bar, macOS's orange microphone
-/// dot going away and coming back, or the app the mic switches to. The caption under them names each beat.
+/// pill going away and coming back, or the app the mic switches to. The caption under them names each beat.
 /// Out of focus the whole card goes quiet: the mic in outline, the sketch in grey.
 struct MicDemo: View {
     @Environment(\.appearsActive) private var active
@@ -113,7 +113,7 @@ struct MicDemo: View {
             // After the 3 s hold the sample LEDs confirm: sweeping down for K.O. II, up for Claude.
             let sweeping = !isLive && step.sweep
             let beat = Int(u / 0.11) % 4
-            let sweepY = sweeping ? 425.0 + Double(gesture == .ko2 ? beat : 3 - beat) * 46 : 517
+            let sweepY = sweeping ? 411.0 + Double(gesture == .ko2 ? beat : 3 - beat) * 54.4 : 519.8
             let loudness = Double(max(0, min(1, (island.level + 60) / 54)))
             let level = !speaking ? 0 : isLive ? loudness * 10 : 1.5 + abs(sin(t * 7)) * 4 + abs(sin(t * 17)) * 1.5
             let caption = isLive ? gesture.label
@@ -187,12 +187,14 @@ struct MicDemo: View {
                 }
             }
             // Handle, swinging in toward the body when squeezed.
-            let pull = squeeze * 44
             var handle = Path()
-            handle.move(to: CGPoint(x: 244 + pull, y: 212 - squeeze * 8))
+            handle.move(to: CGPoint(x: 205 + squeeze * 83, y: 212 - squeeze * 8))
             handle.addLine(to: CGPoint(x: 326, y: 183))
-            handle.addLine(to: CGPoint(x: 326, y: 712))
-            handle.addLine(to: CGPoint(x: 303 + pull * 0.4, y: 710))
+            // One orange piece: the lever, and below it a strip down the case's side.
+            handle.addLine(to: CGPoint(x: 326, y: 892))
+            handle.addLine(to: CGPoint(x: 305, y: 892))
+            // It pivots at the bottom: squeezing swings only the tip in, so the outer edge stays one line.
+            handle.addLine(to: CGPoint(x: 305, y: 710))
             handle.closeSubpath()
             paint(handle, hex(0xEB6133))
             // Cable
@@ -200,10 +202,13 @@ struct MicDemo: View {
             for i in 0..<5 { paint(rect(600, 1161 + Double(i) * 32, 71, 20, 10), hex(0x9E9E9E)) }
             // Side buttons, pushed in when pressed
             let buttons: [(Double, Double, UInt32, UInt32)] =
-                [(1056, 161, 0xE9805A, 0xB4603F), (1067, 417, 0xF6F6F4, 0xBDBDBB), (1067, 857, 0xDADAD7, 0xB0B0AE)]
+                [(1067, 161, 0xE9805A, 0xB4603F), (1067, 417, 0xF6F6F4, 0xBDBDBB), (1067, 857, 0xDADAD7, 0xB0B0AE)]
+            // Only the bumps outside the case show: a pressed button goes into it, not through it.
+            let unclipped = g
+            g.clip(to: Path(CGRect(x: 1067, y: 0, width: 400, height: 1500)))
             for (i, b) in buttons.enumerated() {
                 let inset = i == button ? press * 24 : 0
-                let w = i == 0 ? 34.0 : 48.0
+                let w = 48.0
                 let shape = rect(b.0 - inset, b.1, w, i == 0 ? 111 : 112, 18)
                 paint(shape, hex(b.2), edge: hex(b.3))
                 if i == button && press > 0 {
@@ -211,13 +216,14 @@ struct MicDemo: View {
                              with: .color((outline ? lineColor : hex(0xEB6133)).opacity(press)), lineWidth: outline ? hair * 2 : 10)
                 }
             }
+            g = unclipped
             // Body and speaker panel
             paint(rect(323, 73, 744, 1071, 22), hex(0xF2F2F0), edge: hex(0xCCCCCA))
             paint(Path(roundedRect: CGRect(x: 323, y: 73, width: 744, height: 583),
                        cornerRadii: .init(topLeading: 22, bottomLeading: 18, bottomTrailing: 18, topTrailing: 22)),
                   hex(0x787878))
             // Speaker dots: they darken from the top with the voice, like the reference's level.
-            for row in 0..<10 {
+            for row in 0..<9 {
                 let lit = Double(row) < level
                 let fill: Color = Double(row) < level.rounded(.down) ? hex(0x404040) : lit ? hex(0x757572) : hex(0xCDC9BC)
                 for col in 0..<11 {
@@ -229,17 +235,17 @@ struct MicDemo: View {
                     }
                 }
             }
-            // The two LED strips
-            for (top, lit, color) in [(137.0, 215.0, hex(0xEE4230)), (393.0, sweepY, Color.white)] {
-                paint(rect(971, top, 48, 215, 24), hex(0x5C5C5C))
+            // The two LED strips, on the grille's grid: the column after the holes, rows 1-4 and 6-9.
+            for (first, lit, color) in [(139.0, 193.4, hex(0xEE4230)), (411.0, sweepY, Color.white)] {
+                paint(rect(969.8, first - 24, 48, 3 * 54.4 + 48, 24), hex(0x5C5C5C))
                 for i in 0..<4 {
-                    let y = top + 32 + Double(i) * 46
+                    let y = first + Double(i) * 54.4
                     let on = abs(y - lit) < 8
                     if outline {
-                        if on { g.fill(dot(995, y, 12), with: .color(lineColor)) } else { g.stroke(dot(995, y, 12), with: .color(lineColor), lineWidth: hair) }
+                        if on { g.fill(dot(993.8, y, 12), with: .color(lineColor)) } else { g.stroke(dot(993.8, y, 12), with: .color(lineColor), lineWidth: hair) }
                     } else {
-                        if on { g.fill(dot(995, y, 27), with: .color(color.opacity(0.28))) }
-                        g.fill(dot(995, y, 12), with: .color(on ? color : hex(0x8A8A8A)))
+                        if on { g.fill(dot(993.8, y, 27), with: .color(color.opacity(0.28))) }
+                        g.fill(dot(993.8, y, 12), with: .color(on ? color : hex(0x8A8A8A)))
                     }
                 }
             }
@@ -286,6 +292,9 @@ struct DemoScene: View {
             case .hangUp: menuBar(&g)
             case .claude, .ko2: app(&g)
             }
+        } symbols: {
+            MicButtonGlyph(pressed: MicButtonGlyph.none, line: ink.primary, side: 18, solid: true).tag("app")
+            KO2Glyph().frame(width: 54, height: 74).tag("ko2")
         }
         .accessibilityHidden(true)
     }
@@ -338,11 +347,14 @@ struct DemoScene: View {
         let fill = words ?? min(1, spoken / 2.2)
         let sentAt = gesture == .send || gesture == .queue ? reached("Let go", over: 0.6) : nil
         let gone = gesture == .cancel ? reached("Shake", over: 0.9) : nil
-        let chunks: [Double] = [16, 24, 12, 20, 28, 14]
-        let total = chunks.reduce(0, +) + Double(chunks.count - 1) * 4
-        // Where the message sits: in the composer, on its way, or in the thread.
+        // The words end before the button at the composer's right end (send, clock or draft, centered at 149).
+        let chunks: [Double] = [14, 20, 10, 17, 24, 12]
+        let gap = 3.0
+        let total = chunks.reduce(0, +) + Double(chunks.count - 1) * gap
+        // Where the message sits: in the composer, on its way, or in the thread, right-aligned with your other
+        // message (its edge at 158), so the bubble and the queue's clock stay inside the window.
         let move = sentAt ?? 0
-        let x0 = 22 + (156 - total - 22 - 4) * move
+        let x0 = 22 + (158 - 6 - total - 22) * move
         let y0 = 140 - (140 - 94) * move
         if move > 0 {
             let bubble = rect(x0 - 6, y0 - 3, total + 12, 14, 7)
@@ -359,7 +371,7 @@ struct DemoScene: View {
             if visible > 0 {
                 g.fill(rect(x, y0, c * visible, 8, 4), with: .color(ink.secondary.opacity((1 - (gone ?? 0)) * 0.8)))
             }
-            x += c + 4
+            x += c + gap
         }
         // A blinking caret until the first word.
         if fill < 0.02 && (index.map { steps[$0].squeeze } ?? listening) && Int(t * 2.5) % 2 == 0 {
@@ -387,12 +399,23 @@ struct DemoScene: View {
         var drop = g
         drop.opacity = p
         drop.translateBy(x: 0, y: -16 * (1 - p))
-        drop.fill(rect(64, 26, 108, 140, 16), with: .color(window))
-        drop.stroke(rect(64, 26, 108, 140, 16), with: .color(edge), lineWidth: 1)
-        drop.fill(rect(71, 33, 94, 18, 9), with: .color(bar))
-        for i in 0..<3 { drop.fill(rect(71 + Double(i) * 32, 56, 30, 14, 7), with: .color(i == 1 ? mine : bar)) }
-        drop.stroke(rect(71, 76, 94, 82, 11), with: .color(edge), lineWidth: 1)
-        for i in 0..<3 { drop.fill(rect(79, 86 + Double(i) * 22, i == 1 ? 60 : 72, 9, 4.5), with: .color(bar)) }
+        // The panel as it is: the mic and "Squeeze to talk", the "Send to" line, then Chats, Gestures and Settings.
+        drop.fill(rect(52, 26, 120, 104, 20), with: .color(window))
+        drop.stroke(rect(52, 26, 120, 104, 20), with: .color(edge), lineWidth: 1)
+        let fill = ink.secondary.opacity(scheme == .dark ? 0.22 : 0.12)
+        drop.fill(rect(59, 33, 106, 26, 13), with: .color(fill))
+        if let icon = drop.resolveSymbol(id: "app") { drop.draw(icon, in: CGRect(x: 64, y: 37, width: 18, height: 18)) }
+        drop.fill(rect(88, 42, 54, 8, 4), with: .color(ink.primary.opacity(0.75)))
+        drop.fill(rect(59, 64, 106, 22, 11), with: .color(fill))
+        drop.fill(rect(66, 72, 16, 6, 3), with: .color(ink.secondary.opacity(0.6)))
+        drop.fill(rect(85, 72, 58, 6, 3), with: .color(ink.primary.opacity(0.7)))
+        symbol(&drop, "chevron.up.chevron.down", 150, 75, 6, ink.secondary)
+        for i in 0..<3 {
+            let x = 59 + Double(i) * 36.3
+            drop.fill(rect(x, 91, 33.4, 22, 11), with: .color(fill))
+            drop.fill(dot(x + 9, 102, 2.6), with: .color(ink.primary.opacity(0.7)))
+            drop.fill(rect(x + 14, 99.5, 13, 5, 2.5), with: .color(ink.primary.opacity(0.7)))
+        }
     }
 
     /// Claude's window coming forward over another one.
@@ -418,26 +441,50 @@ struct DemoScene: View {
         }
     }
 
-    /// A close-up of the menu bar: macOS's orange dot shows while the mic is open, and goes when it is muted.
+    /// A close-up of the menu bar as it really looks: macOS's orange microphone pill, this app's icon, Claude's, then
+    /// Wi-Fi, Control Center and the date. Muting takes the pill away and strikes this app's icon, as the real menu
+    /// bar does; nothing else changes.
     private func menuBar(_ g: inout GraphicsContext) {
         guard let index else { return }
         let label = steps[index].label
         let open: Double = label == "Muted" ? 1 - Self.ease(u / 0.35)
             : label == "Mic open" ? Self.ease(u / 0.35)
             : index < 2 ? 1 : 0
-        let pop = label == "Mic open" ? 1 + 0.5 * sin(.pi * min(1, u / 0.45)) : 1
-        g.fill(rect(4, 62, 168, 30, 9), with: .color(bar.opacity(0.6)))
-        g.stroke(rect(4, 62, 168, 30, 9), with: .color(edge), lineWidth: 1)
-        // This app's icon, then the system's: control center, wifi, clock.
-        symbol(&g, open > 0.5 ? "mic.fill" : "mic.slash.fill", 52, 77, 13, ink.primary)
-        symbol(&g, "switch.2", 100, 77, 12, ink.secondary)
-        symbol(&g, "wifi", 122, 77, 12, ink.secondary)
-        caption(&g, "9:41", 151, 77, 12, ink.secondary)
+        let pop = label == "Mic open" ? 1 + 0.18 * sin(.pi * min(1, u / 0.45)) : 1
+        let y = 80.0
+        g.fill(rect(0, y - 18, 176, 36, 9), with: .color(bar.opacity(0.6)))
+        g.stroke(rect(0, y - 18, 176, 36, 9), with: .color(edge), lineWidth: 1)
+        // The system's indicator: only there while some app has the mic.
         if open > 0 {
-            g.fill(dot(78, 77, 9 * open * pop), with: .color(orange.opacity(0.25 * open)))
-            g.fill(dot(78, 77, 4.5 * open * pop), with: .color(orange.opacity(open)))
+            var pill = g
+            pill.opacity = open
+            let w = 32 * (0.7 + 0.3 * open) * pop, h = 19 * (0.7 + 0.3 * open) * pop
+            pill.fill(rect(21 - w / 2, y - h / 2, w, h, h / 2), with: .color(orange))
+            symbol(&pill, "mic.fill", 21, y, 10 * pop, .white)
         }
-        caption(&g, open > 0.5 ? "Mic in use" : "Mic closed", 78, 112, 12, open > 0.5 ? orange : ink.secondary)
+        // This app's own icon, the one in the menu bar; muted it has a slash with a gap cut around it.
+        if let icon = g.resolveSymbol(id: "app") {
+            var slash = Path()
+            slash.move(to: CGPoint(x: 44, y: y + 8.5))
+            slash.addLine(to: CGPoint(x: 58, y: y - 8.5))
+            g.drawLayer { app in
+                app.draw(icon, at: CGPoint(x: 51, y: y))
+                guard open < 0.5 else { return }
+                var cut = app
+                cut.blendMode = .destinationOut
+                cut.stroke(slash, with: .color(.black), style: StrokeStyle(lineWidth: 3.6, lineCap: .round))
+                app.stroke(slash, with: .color(ink.primary), style: StrokeStyle(lineWidth: 1.2, lineCap: .round))
+            }
+        }
+        // Claude's icon, untouched: muting this app doesn't change it.
+        if let mark = ClaudeMark.image {
+            var image = g.resolve(Image(nsImage: mark).renderingMode(.template))
+            image.shading = .color(ink.primary)
+            g.draw(image, in: CGRect(x: 66, y: y - 9, width: 18, height: 18))
+        }
+        symbol(&g, "wifi", 97, y, 10, ink.primary)
+        symbol(&g, "switch.2", 115, y, 10, ink.primary)
+        caption(&g, "Sat 9:41", 149, y, 10.5, ink.primary)
     }
 
     /// The app the mic switches to: Claude, or the K.O. II sampler, filling in as the hold counts to three.
@@ -461,18 +508,8 @@ struct DemoScene: View {
                 tile.draw(image, in: CGRect(x: cx - 20, y: cy - 20, width: 40, height: 40))
             }
         } else {
-            // A lo-fi sampler: a slab with a small screen, two knobs and a grid of pads.
-            let body = rect(cx - 30, cy - 38, 60, 76, 5)
-            tile.fill(body, with: .color(scheme == .dark ? Color(white: 0.55) : Color(white: 0.86)))
-            tile.stroke(body, with: .color(edge), lineWidth: 1)
-            tile.fill(rect(cx - 24, cy - 32, 24, 12, 2), with: .color(Color(white: 0.2)))
-            for x in [cx + 10, cx + 21] { tile.fill(dot(x, cy - 26, 4), with: .color(Color(white: 0.35))) }
-            for row in 0..<4 {
-                for col in 0..<3 {
-                    let pad = rect(cx - 22 + Double(col) * 16, cy - 12 + Double(row) * 12.5, 12, 9.5, 2)
-                    tile.fill(pad, with: .color(row == 3 && col == 2 ? orange : Color(white: scheme == .dark ? 0.8 : 0.97)))
-                }
-            }
+            // The K.O. II itself, drawn from TE's top view like the mic beside it.
+            if let ko2 = tile.resolveSymbol(id: "ko2") { tile.draw(ko2, in: CGRect(x: cx - 27, y: cy - 37, width: 54, height: 74)) }
         }
         if saved {
             let p = index == 1 ? Self.ease(u / 0.3) : 1
@@ -480,5 +517,61 @@ struct DemoScene: View {
             symbol(&g, index == 1 ? "checkmark" : "arrow.clockwise", cx + 30, cy - 30, 10 * p, .white)
         }
         caption(&g, gesture == .claude ? "Claude mode" : "K.O. II mode", cx, 150, 13, saved ? ink.primary : ink.secondary)
+    }
+}
+
+/// The K.O. II (EP-133) from above, in its colors, drawn like the mic beside it: the keys where TE's top-view drawing
+/// puts them (units of that drawing, 288.5 x 393.5, as in the K.O. II companion's model): lid and speaker, the screen
+/// band, three knobs, SOUND / MAIN / TEMPO, the left column with the fader slot, the group keys, the 12 pads, and
+/// SAMPLE to PLAY on the right.
+struct KO2Glyph: View {
+    var body: some View {
+        Canvas { g, size in
+            let k = min(size.width / 288.5, size.height / 393.5)
+            g.translateBy(x: (size.width - 288.5 * k) / 2, y: (size.height - 393.5 * k) / 2)
+            g.scaleBy(x: k, y: k)
+            g.translateBy(x: -75.7, y: -61.0)
+            func hex(_ h: UInt32) -> Color {
+                Color(.sRGB, red: Double(h >> 16 & 255) / 255, green: Double(h >> 8 & 255) / 255, blue: Double(h & 255) / 255, opacity: 1)
+            }
+            func box(_ x: Double, _ y: Double, _ w: Double, _ h: Double, _ r: Double) -> Path {
+                Path(roundedRect: CGRect(x: x, y: y, width: w, height: h), cornerRadius: r, style: .continuous)
+            }
+            let hair = 1.0 / k
+            func paint(_ path: Path, _ fill: UInt32, _ edge: UInt32) {
+                g.fill(path, with: .color(hex(fill)))
+                g.stroke(path, with: .color(hex(edge)), lineWidth: hair)
+            }
+            // The case, the lid over the batteries and the speaker beside it, the screen band across.
+            paint(box(75.7, 61.0, 288.5, 393.5, 6), 0xECECE9, 0xC8C8C5)
+            paint(box(75.7, 74.1, 196.6, 78.7, 3), 0xF4F4F2, 0xCFCFCC)
+            for row in 0..<4 {
+                for col in 0..<5 { g.fill(Path(ellipseIn: CGRect(x: 284 + Double(col) * 15.5, y: 86 + Double(row) * 16.5, width: 6.5, height: 6.5)), with: .color(hex(0x858A90))) }
+            }
+            paint(box(75.7, 152.8, 288.5, 78.5, 2), 0x231F20, 0x231F20)
+            let col = [88.9, 128.1, 167.5, 206.8, 246.2, 285.5, 324.8], row = [244.5, 284.0, 323.3, 362.6, 402.0]
+            let K = 26.3, half = 13.1
+            let colors: [String: (UInt32, UInt32)] = ["bk": (0x231F20, 0x3A3536), "or": (0xF15A22, 0xD24A15),
+                                                      "wh": (0xE4E3DF, 0xB9B8B4), "gr": (0x989FA5, 0x7D848A), "sl": (0x818E95, 0x6A767D)]
+            func key(_ x: Double, _ y: Double, _ w: Double, _ h: Double, _ c: String) {
+                let (f, e) = colors[c]!
+                paint(box(x, y, w, h, 3.5), f, e)
+            }
+            // Knobs: X on the left, then the two on the right.
+            for x in [col[0], col[5], col[6]] {
+                paint(Path(ellipseIn: CGRect(x: x, y: row[0], width: 26.6, height: 26.6)), 0x989FA5, 0x7D848A)
+                g.fill(Path(ellipseIn: CGRect(x: x + 7.3, y: row[0] + 7.3, width: 12, height: 12)), with: .color(hex(0xC9CED2)))
+            }
+            for i in 1...3 { key(col[i], row[0], K, half, "bk") }                             // SOUND, MAIN, TEMPO
+            key(89.7, 284.8, 24.6, 11.5, "bk"); key(89.7, 311.0, 24.6, 11.5, "bk"); key(89.7, 415.8, 24.6, 11.5, "gr")
+            g.fill(box(100.6, 336.6, 2.8, 62, 1.4), with: .color(hex(0x6E7276)))             // the fader slot and its cap
+            paint(Path(ellipseIn: CGRect(x: 102 - 9, y: 367.6 - 9, width: 18, height: 18)), 0x989FA5, 0x7D848A)
+            for r in 1...4 { key(col[1], row[r], K, K, "gr") }                               // groups A to D
+            for r in 1...4 { for c in 2...4 { key(col[c], row[r], K, K, "bk") } }            // the 12 pads
+            key(col[5], row[1], K, half, "or"); key(col[6], row[1], K, half, "bk")            // SAMPLE, TIMING
+            key(col[5], row[2], K, half, "bk"); key(col[6], row[2], K, half, "wh")            // FX, ERASE
+            key(col[5], row[3], K, K, "wh"); key(col[6], row[3], K, K, "wh")                  // − and +
+            key(col[5], row[4], K, K, "or"); key(col[6], row[4], K, K, "sl")                  // RECORD, PLAY
+        }
     }
 }

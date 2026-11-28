@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the FXMic startup script for the EP-2350 by patching Teenage Engineering's own startup script.
+"""Build the Squeeze startup script for the EP-2350 by patching Teenage Engineering's own startup script.
 
 TE's script is copyrighted and is not part of this repository. It is read from YOUR mic (its /rom/main.py) over
 the serial console, or from a local copy you extracted yourself, and our additions are inserted:

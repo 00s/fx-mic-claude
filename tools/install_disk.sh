@@ -26,10 +26,10 @@ case "${1:-}" in
     cp -X "$ROOT/firmware/fxmic/boot_main.py" "$DISK/main.py"          # last: the stub expects claude/ to be complete
     sync; echo "installed $(basename "$PACK") (mode: $(cat "$DISK/claude/mode")):"; ls -la "$DISK" "$DISK/claude" | grep -vE "^total|\.\.?$|/\._"
     if [ -f "$PACK/pitches.json" ]; then
-      echo "this pack uses other pitches; point FXMic at them, then restart FXMic:"
+      echo "this pack uses other pitches; point Squeeze at them, then restart Squeeze:"
       python3 -c "import json,sys; [print('  defaults write com.miguel.fxmic', k, '-array', *v) for k, v in json.load(open(sys.argv[1])).items()]" "$PACK/pitches.json"
     else
-      echo "FXMic's built-in pitches match this pack; if you changed them: defaults delete com.miguel.fxmic chirpFreqs (and cancelFreqs, pressFreqs, releaseFreqs)"
+      echo "Squeeze's built-in pitches match this pack; if you changed them: defaults delete com.miguel.fxmic chirpFreqs (and cancelFreqs, pressFreqs, releaseFreqs)"
     fi
     ;;
   remove)

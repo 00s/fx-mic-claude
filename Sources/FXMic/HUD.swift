@@ -17,6 +17,9 @@ enum Metric {
     static var inner: CGFloat { card - pad }
     /// Between pieces.
     static let gap: CGFloat = 10
+    /// The panel's glass sheet: the margin inside it, and the clear space around it for its shadow.
+    static let sheetPad: CGFloat = 12
+    static let sheetMargin: CGFloat = 20
 }
 
 /// The name people see. The bundle, its identifier, the executable and ~/.fxmic keep "FXMic" so permission grants,
@@ -38,8 +41,14 @@ final class HUDModel: ObservableObject {
     @Published var intent: String? = nil
     /// Claude's dictation is starting: a spinner in place of the icon, and no meter (nothing is being heard yet).
     @Published var loading = false
+    /// The mic's signal is too faint to trust: the status says so while the handle is still squeezed.
+    @Published var weak = false
     /// On screen: the island slides down into place when true, up and out when false.
     @Published var shown = false
+    /// A click on the squeeze rail while squeezing: 0 send, 1 queue, 2 draft, 3 cancel. Set by the controller.
+    var onSqueezePick: ((Int) -> Void)? = nil
+    /// The floating island's frame in its window, so the window takes clicks only over the island.
+    var islandFrame: CGRect = .zero
 }
 
 /// The island, one component for both places it appears: floating at the top of the screen while you squeeze, and as
@@ -83,9 +92,10 @@ struct IslandStack<Action: View>: View {
     private var hasDestination: Bool { showsDestination && !destination.isEmpty }
     /// Queue or draft picked for the squeeze in progress: the status says so, with its own color and symbol.
     private var picked: String? { idle == nil && model.title == "Listening" ? model.intent : nil }
-    private var statusTitle: String { idle?.title ?? picked.map { "Listening · \($0)" } ?? model.title }
-    private var statusIcon: String { picked == "Queue" ? "clock" : picked == "Draft" ? "square.and.pencil" : model.icon }
-    private var statusColor: Color { picked == "Queue" ? .orange : picked == "Draft" ? .blue : model.tint }
+    private var faint: Bool { squeezing && model.weak }
+    private var statusTitle: String { faint ? "Weak signal · speak up" : idle?.title ?? picked.map { "Listening · \($0)" } ?? model.title }
+    private var statusIcon: String { faint ? "waveform.badge.exclamationmark" : picked == "Queue" ? "clock" : picked == "Draft" ? "square.and.pencil" : model.icon }
+    private var statusColor: Color { faint || picked == "Queue" ? .orange : picked == "Draft" ? .blue : model.tint }
 
     var body: some View {
         let ink = Ink.of(scheme)
@@ -144,7 +154,8 @@ struct IslandStack<Action: View>: View {
                 if active && model.loading {
                     ProgressView().controlSize(.small)
                 } else if idle?.live == true {
-                    MicButtonGlyph(pressed: MicButtonGlyph.squeeze, line: ink.secondary)
+                    // The same squeeze-and-let-go loop as the rail's "Release to send": how to start a message.
+                    MovingGlyph(kind: .release, line: ink.secondary)
                 } else {
                     Image(systemName: idle?.icon ?? statusIcon).font(.system(size: 20, weight: .medium)).foregroundStyle(tint)
                 }
@@ -235,21 +246,61 @@ struct IslandStack<Action: View>: View {
         if Settings.shared.shakeToCancel {
             items.append(RailItem("Shake to\ncancel") { MovingGlyph(kind: .shake, line: ink.secondary) })
         }
-        return ActionRail(items: items, selected: chosen, onPick: squeezing ? nil : onPick)
+        return ActionRail(items: items, selected: chosen, onPick: squeezing ? model.onSqueezePick : onPick)
             .opacity(model.title == "Starting…" ? 0.45 : 1)
     }
 
     /// The state colors, dark enough to read on light glass.
     private func readable(_ color: Color) -> Color {
         guard scheme == .light else { return color }
-        return color == .yellow ? Ink.of(.light).live : color.mix(with: .black, by: 0.3)
+        // Each state keeps its own hue on light glass: Listening a deep yellow, Queue (and weak signal) a clear orange.
+        if color == .yellow { return Color(.sRGB, red: 0.80, green: 0.60, blue: 0.0, opacity: 1) }
+        if color == .orange { return Color(.sRGB, red: 0.91, green: 0.40, blue: 0.06, opacity: 1) }
+        return color.mix(with: .black, by: 0.3)
+    }
+}
+
+/// True on the panel, which is one sheet of Liquid Glass: the pieces on it are plain fills, never glass on glass.
+private struct OnSheetKey: EnvironmentKey { static let defaultValue = false }
+extension EnvironmentValues {
+    var onSheet: Bool { get { self[OnSheetKey.self] } set { self[OnSheetKey.self] = newValue } }
+}
+
+struct Frosted<S: Shape>: ViewModifier {
+    @Environment(\.onSheet) private var onSheet
+    @Environment(\.colorScheme) private var scheme
+    let shape: S
+    let tint: Color
+    func body(content: Content) -> some View {
+        if onSheet {
+            // The neutral tints are for glass over the screen; on the sheet they would muddy it, so only a color stays.
+            let ink = Ink.of(scheme)
+            let neutral = tint == ink.dense || tint == ink.wash
+            content.background(neutral ? ink.primary.opacity(0.07) : tint, in: shape)
+        } else {
+            content.glassEffect(.regular.tint(tint).interactive(), in: shape).background(.ultraThinMaterial, in: shape)
+        }
     }
 }
 
 extension View {
     /// The island's one material: Liquid Glass over a frost, so what's behind stays soft and text stays readable.
     func frosted(_ shape: some Shape, tint: Color) -> some View {
-        glassEffect(.regular.tint(tint).interactive(), in: shape).background(.ultraThinMaterial, in: shape)
+        modifier(Frosted(shape: shape, tint: tint))
+    }
+}
+
+/// The rail's track: frost where it floats over the screen, a quiet fill on the panel's sheet.
+private struct RailTrack: ViewModifier {
+    @Environment(\.onSheet) private var onSheet
+    @Environment(\.colorScheme) private var scheme
+    func body(content: Content) -> some View {
+        let ink = Ink.of(scheme), shape = RoundedRectangle(cornerRadius: Metric.card, style: .continuous)
+        if onSheet {
+            content.background(ink.primary.opacity(0.07), in: shape)
+        } else {
+            content.background(ink.dense, in: shape).background(.regularMaterial, in: shape)
+        }
     }
 }
 
@@ -317,8 +368,7 @@ struct ActionRail: View {
         }
         .padding(Metric.pad)
         // The track is frost.
-        .background(ink.dense, in: RoundedRectangle(cornerRadius: Metric.card, style: .continuous))
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: Metric.card, style: .continuous))
+        .modifier(RailTrack())
         .overlay(RoundedRectangle(cornerRadius: Metric.card, style: .continuous).strokeBorder(ink.primary.opacity(0.10), lineWidth: 1))
         .animation(.spring(response: 0.42, dampingFraction: 0.68), value: selected)
     }
@@ -341,7 +391,9 @@ struct LiquidLevel: View {
                         Ellipse()
                             .fill(color.opacity(i == 0 ? 0.75 : 0.5))
                             .frame(width: w * (0.28 + 0.55 * level), height: h * (0.7 + 0.9 * level))
-                            .position(x: w * (i == 0 ? 0.26 : 0.68) + CGFloat(drift) * w * 0.14,
+                            // One pool from the left: the second blob is its front edge, as far right as the voice
+                            // is loud, so the color never shows as a separate patch on the right.
+                            .position(x: w * (i == 0 ? 0.24 : 0.2 + 0.48 * level) + CGFloat(drift) * w * (i == 0 ? 0.1 : 0.05),
                                       y: h * 0.5 + CGFloat(cos(t * 1.7 + Double(i))) * h * 0.18)
                     }
                 }
@@ -359,6 +411,7 @@ struct HUDCanvas: View {
     @ObservedObject var model: HUDModel
     var body: some View {
         IslandStack(model: model) { EmptyView() }
+            .onGeometryChange(for: CGRect.self, of: { $0.frame(in: .global) }) { model.islandFrame = $0 }
             .offset(y: model.shown ? 0 : -12)
             .opacity(model.shown ? 1 : 0)
             .padding(.top, 10)
@@ -396,7 +449,7 @@ struct MicButtonGlyph: View {
             let k = min(size.width / 1150, (size.height - 2) / 1071)
             g.translateBy(x: (size.width - 1150 * k) / 2 - 150 * k, y: (size.height - 1071 * k) / 2 - 73 * k)
             g.scaleBy(x: k, y: k)
-            let width = 1.1 / k                                       // a 1.1 pt line at any size
+            let width = (solid ? 0.75 : 1.1) / k                      // finer in the menu bar, beside the system's icons
             func stroke(_ path: Path, _ color: Color) {
                 g.stroke(path, with: .color(color), style: StrokeStyle(lineWidth: width, lineCap: .round, lineJoin: .round))
             }
@@ -410,8 +463,10 @@ struct MicButtonGlyph: View {
             var handle = Path()
             handle.move(to: CGPoint(x: 323, y: 183))
             // Wider when it's the one meant, swinging in toward the body as it is squeezed.
-            handle.addLine(to: CGPoint(x: squeezing ? 150 + 140 * pull : 244, y: squeezing ? 235 - 20 * pull : 212))
-            handle.addLine(to: CGPoint(x: squeezing ? 230 + 80 * pull : 303, y: 710))
+            // In the menu bar the handle sticks out further at rest: at that size the real proportions read as a fuel
+            // pump's hose rather than a handle to squeeze.
+            handle.addLine(to: CGPoint(x: squeezing ? 150 + 140 * pull : solid ? 160 : 244, y: squeezing || solid ? 235 - 20 * pull : 212))
+            handle.addLine(to: CGPoint(x: squeezing ? 230 + 80 * pull : solid ? 250 : 303, y: 710))
             handle.addLine(to: CGPoint(x: 323, y: 712))
             if squeezing {
                 g.fill(handle, with: .color(hex(0xEB6133)))
@@ -441,12 +496,19 @@ struct MicButtonGlyph: View {
                            with: .color(line.opacity(0.7)))
                 }
             }
-            if pressed == Self.shake {                                // motion marks either side
-                for (x, bulge) in [(168.0, -60.0), (1232.0, 60.0)] {
-                    var mark = Path()
-                    mark.move(to: CGPoint(x: x, y: 380))
-                    mark.addQuadCurve(to: CGPoint(x: x, y: 840), control: CGPoint(x: x + bulge * 1.6, y: 610))
-                    stroke(mark, hex(0xEB6133))
+            if pressed == Self.shake {
+                // Motion marks either side, like a cartoon shake: two short arcs a side, curving away from the body,
+                // bolder than the outline so they read at 34 pt.
+                // Beside the lower body, clear of the handle on the left and the buttons on the right.
+                for side in [-1.0, 1.0] {
+                    for (i, x) in Array(side < 0 ? [272.0, 200.0] : [1180.0, 1252.0]).enumerated() {
+                        let half = i == 0 ? 150.0 : 105.0
+                        var mark = Path()
+                        mark.move(to: CGPoint(x: x, y: 790 - half))
+                        mark.addQuadCurve(to: CGPoint(x: x, y: 790 + half), control: CGPoint(x: x + side * 50, y: 790))
+                        g.stroke(mark, with: .color(hex(0xEB6133)),
+                                 style: StrokeStyle(lineWidth: width * 1.8, lineCap: .round, lineJoin: .round))
+                    }
                 }
             }
             for (i, y) in [236.0, 500.0, 913.0].enumerated() {
@@ -556,11 +618,17 @@ extension Color {
     static let unmuteGlass = Color(.sRGB, red: 0.08, green: 0.50, blue: 0.24, opacity: 1)
 }
 
-/// The app's two typefaces, bundled (fonts/): Inter Tight for what you read and click, JetBrains Mono for the
-/// device-readout captions and states. SF Symbols keep the system font.
+/// The app's type, from its design system: Apple's own fonts only, SF Pro for what you read and click and SF Mono for
+/// the device-readout captions and states. Every text style goes through these two; tools/check_design.sh fails the
+/// build if a bundled or named font comes back.
 extension Font {
-    static func ui(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font { .custom("Inter Tight", fixedSize: size).weight(weight) }
-    static func mono(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font { .custom("JetBrains Mono", fixedSize: size).weight(weight) }
+    static func ui(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font { .system(size: size, weight: weight) }
+    static func mono(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font { .system(size: size, weight: weight, design: .monospaced) }
+}
+
+/// The island never takes focus, so its first click must act instead of only bringing the window forward.
+final class FirstClickHostingView<Content: View>: NSHostingView<Content> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
 
 final class HUDPanel: NSPanel {
@@ -576,6 +644,9 @@ final class HUDController {
     private var lastPartial = ""
     private var target = ""
     private var suppressPartials = false
+    /// While the island is on screen: the window takes clicks only with the pointer over the island, so the rail can
+    /// be clicked and the rest of the screen under the transparent canvas still can.
+    private var hoverTimer: Timer?
     /// The panel is open and shows the island's state itself: the floating island stays away.
     private var embedded = false
 
@@ -594,7 +665,20 @@ final class HUDController {
         panel.hidesOnDeactivate = false
         panel.isReleasedWhenClosed = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
-        panel.contentView = NSHostingView(rootView: HUDCanvas(model: model))
+        panel.contentView = FirstClickHostingView(rootView: HUDCanvas(model: model))
+        hoverTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in self?.followPointer() }
+    }
+
+    private func followPointer() {
+        guard panel.isVisible, model.shown, let content = panel.contentView else {
+            if !panel.ignoresMouseEvents { panel.ignoresMouseEvents = true }
+            return
+        }
+        // SwiftUI's global frame is top-left origin in the content view; the window wants bottom-left.
+        let f = model.islandFrame
+        let inWindow = NSRect(x: f.minX, y: content.bounds.height - f.maxY, width: f.width, height: f.height)
+        let over = panel.convertToScreen(inWindow).contains(NSEvent.mouseLocation)
+        if panel.ignoresMouseEvents == over { panel.ignoresMouseEvents = !over }
     }
 
     /// The canvas: wide enough for the wide island and its shadow, tall enough for a long transcript, its top at the
@@ -644,6 +728,7 @@ final class HUDController {
     func listening(target: String?) {
         suppressPartials = false
         model.intent = nil
+        model.weak = false
         model.loading = false
         model.title = "Listening"
         model.body = ""
@@ -690,11 +775,23 @@ final class HUDController {
     }
 
     /// Queue or draft chosen with a mic button during the squeeze: the highlighted pill moves; nothing else changes.
-    func mode(_ label: String) {
+    func mode(_ label: String?) {
         model.intent = label
     }
 
     /// The message is being finalized: "Sending…", "Adding to draft…" or "Queueing…".
+    /// Released with no speech heard here: the island stays, spinning, until the text (or "Nothing to send") takes
+    /// its place, so it never disappears and comes back.
+    func finishing() {
+        model.loading = true
+        model.title = "Finishing…"
+        model.tint = .gray
+        model.showMeter = false
+        model.level = -60
+        show()
+        hide(after: 6)                         // watchdog in case nothing reports back
+    }
+
     func sending(_ label: String = "Sending…") {
         model.loading = false
         model.title = label
