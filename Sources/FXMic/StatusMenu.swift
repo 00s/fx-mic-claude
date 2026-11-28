@@ -20,18 +20,25 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         let line: Color = dark ? .white : .black          // not a template: the white lower half must stay white
         let ink: NSColor = dark ? .white : .black
         let glyph = MainActor.assumeIsolated { () -> NSImage? in
-            let renderer = ImageRenderer(content: MicButtonGlyph(pressed: part, line: line, side: side, solid: true))
+            let renderer = ImageRenderer(content: MicButtonGlyph(pressed: part, line: line, side: side - 2, solid: true))
             renderer.scale = 2
             return renderer.nsImage
         }
         let image = NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
-            glyph?.draw(in: rect, from: .zero, operation: .sourceOver, fraction: hungUp ? 0.45 : 1)
+            // A 16 pt body in the 20 pt square, near the size of the system's icons; the badges keep the full square.
+            glyph?.draw(in: rect.insetBy(dx: 1, dy: 1), from: .zero, operation: .sourceOver, fraction: 1)
             if hungUp {
                 let slash = NSBezierPath()
                 slash.move(to: NSPoint(x: 3, y: 2.5))
                 slash.line(to: NSPoint(x: side - 3, y: side - 2.5))
-                slash.lineWidth = 1.6
                 slash.lineCapStyle = .round
+                // As the system draws a muted speaker: full strength, with a gap cut around the slash.
+                NSGraphicsContext.current?.compositingOperation = .destinationOut
+                NSColor.black.setStroke()
+                slash.lineWidth = 3.6
+                slash.stroke()
+                NSGraphicsContext.current?.compositingOperation = .sourceOver
+                slash.lineWidth = 1.2
                 ink.setStroke()
                 slash.stroke()
             }

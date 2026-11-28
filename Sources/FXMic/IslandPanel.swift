@@ -244,7 +244,16 @@ struct PanelView: View {
     /// The gestures page plays every gesture in turn until one is picked.
     @State private var touring = true
     @FocusState private var searching: Bool
+    /// The panel's look: one sheet of Liquid Glass (the default), or each piece as its own glass.
+    @AppStorage("panelSeparatePieces") private var separate = false
     var close: () -> Void
+
+    /// Whether anything goes below the page buttons; an empty section would still add its gap to the bottom margin.
+    private var showsPage: Bool {
+        if model.page == .gestures { return true }
+        if squeezingNow { return false }
+        return model.page != .main || !ComposerDelivery.isTrusted
+    }
 
     private var squeezingNow: Bool { island.shown && (island.title == "Listening" || island.title == "Starting…") }
 
@@ -253,34 +262,40 @@ struct PanelView: View {
         VStack(spacing: Metric.gap) {
             VStack(spacing: Metric.gap) {
                 liveArea(ink)
-                // What the bottom row opens appears under everything, from the top, in one place.
-                ZStack(alignment: .top) {
-                if squeezingNow && model.page != .gestures {
-                    // The squeeze rail takes this place until the handle is let go.
-                } else if model.page == .gestures {
-                    gesturesPage(ink).transition(.opacity.combined(with: .offset(y: -8)))
-                } else if model.page != .main || !ComposerDelivery.isTrusted {
-                    VStack(alignment: .leading, spacing: model.page == .settings ? 6 : 4) {    // its own glass, apart from the live area
-                        switch model.page {
-                        case .main: mainPage(ink)
-                        case .pick: pickPage(ink)
-                        case .gestures: EmptyView()
-                        case .settings: settingsPage(ink)
+                // What the bottom row opens appears under everything, from the top, in one place. While the handle is
+                // squeezed the squeeze rail takes this place on the other pages.
+                if showsPage {
+                    ZStack(alignment: .top) {
+                        if model.page == .gestures {
+                            gesturesPage(ink).transition(.opacity.combined(with: .offset(y: -8)))
+                        } else {
+                            VStack(alignment: .leading, spacing: model.page == .settings ? Metric.gap : 4) {
+                                switch model.page {
+                                case .main: mainPage(ink)
+                                case .pick: pickPage(ink)
+                                case .gestures: EmptyView()
+                                case .settings: settingsPage(ink)
+                                }
+                            }
+                            // Straight on the sheet; as separate pieces the page needs its own card.
+                            .modifier(PageCard(on: separate, tint: ink.wash))
+                            .id(model.page)
+                            .transition(.opacity.combined(with: .offset(y: -8)))
                         }
                     }
-                    .padding(Metric.pad)
-                    .frosted(RoundedRectangle(cornerRadius: Metric.card, style: .continuous), tint: ink.wash)
-                    .id(model.page)
-                    .transition(.opacity.combined(with: .offset(y: -8)))
-                }
                 }
             }
+            // One sheet of the system's Liquid Glass, untinted; the same margin all round, corners concentric with the
+            // cards inside it.
+            .environment(\.onSheet, !separate)
+            .padding(separate ? 0 : Metric.sheetPad)
+            .background { if !separate { SystemGlass(radius: Metric.card + Metric.sheetPad) } }
         }
         .animation(.easeInOut(duration: 0.2), value: island.shown)
         .animation(.spring(response: 0.34, dampingFraction: 0.86), value: model.page)
         .font(.ui(14)).foregroundStyle(ink.primary)
-        .frame(width: IslandStack<EmptyView>.width)
-        .padding(12)
+        .frame(width: IslandStack<EmptyView>.width + (separate ? 0 : 2 * Metric.sheetPad))
+        .padding(.top, 8).padding(.bottom, Metric.sheetMargin).padding(.horizontal, Metric.sheetMargin)
     }
 
     // MARK: live
@@ -315,7 +330,7 @@ struct PanelView: View {
                     .font(.system(size: 20, weight: .semibold)).foregroundStyle(.white)
                     .frame(width: Metric.bar, height: Metric.bar)
                     .contentTransition(.symbolEffect(.replace))
-                    .glassEffect(.clear.tint((off ? Color.unmuteGlass : ink.danger).opacity(0.55)).interactive(), in: Circle())
+                    .modifier(MuteGlass(tint: (off ? Color.unmuteGlass : ink.danger).opacity(0.55)))
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
@@ -389,11 +404,13 @@ struct PanelView: View {
         .padding(.horizontal, 12).frame(height: Metric.row)
         .background(RoundedRectangle(cornerRadius: Metric.inner, style: .continuous).fill(ink.hover))
         .onAppear { searching = true }
+        // Pinned ones are above already, so each conversation (and its pin) is on screen once.
+        let found = (model.pickable ?? []).filter {
+            !model.pins.contains($0) && (query.isEmpty || $0.localizedCaseInsensitiveContains(query))
+        }
         ScrollView {
             VStack(spacing: 2) {
-                if let all = model.pickable {
-                    // Pinned ones are above already, so each conversation (and its pin) is on screen once.
-                    let found = all.filter { !model.pins.contains($0) && (query.isEmpty || $0.localizedCaseInsensitiveContains(query)) }
+                if model.pickable != nil {
                     ForEach(found, id: \.self) { chat in
                         PanelRow(selected: model.selected == chat, action: { model.select(chat); go(.main) }) {
                             ClaudeIcon(size: 22).frame(width: 28)
@@ -407,7 +424,8 @@ struct PanelView: View {
                 }
             }
         }
-        .frame(height: 276)
+        // Only as tall as its rows (up to six), so the bottom margin matches the others.
+        .frame(height: CGFloat(min(6, max(1, found.count))) * (Metric.row + 2) - 2)
     }
 
     func group(_ title: String, _ ink: Ink) -> some View {
@@ -476,13 +494,11 @@ struct PanelView: View {
             .toggleStyle(.switch).padding(.horizontal, 12).frame(minHeight: Metric.row)
     }
 
-    /// One group of settings, as macOS groups them: a quiet title over its own rounded container.
-    func settingsGroup<Rows: View>(_ title: String, _ ink: Ink, @ViewBuilder _ rows: () -> Rows) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(.mono(12, .semibold)).foregroundStyle(ink.secondary).padding(.horizontal, 12)
-            VStack(spacing: 0) { rows() }
-                .background(RoundedRectangle(cornerRadius: Metric.inner, style: .continuous).fill(ink.hover))
-        }
+    /// One group of settings in its own rounded container; the rows say what they are, so it carries no title.
+    func settingsGroup<Rows: View>(_ ink: Ink, @ViewBuilder _ rows: () -> Rows) -> some View {
+        VStack(spacing: 0) { rows() }
+            .padding(.vertical, 4)
+            .background(RoundedRectangle(cornerRadius: separate ? Metric.inner : Metric.card, style: .continuous).fill(ink.primary.opacity(0.07)))
     }
 
     /// Grouped by what each setting is about: the mic and how it is opened, how words are heard, what the mic's
@@ -490,7 +506,7 @@ struct PanelView: View {
     @ViewBuilder func settingsPage(_ ink: Ink) -> some View {
         let s = Settings.shared
         let _ = model.revision
-        settingsGroup("Microphone", ink) {
+        settingsGroup(ink) {
             HStack {
                 Text("Input")
                 Spacer()
@@ -508,13 +524,13 @@ struct PanelView: View {
                     .font(.mono(13)).buttonStyle(.bordered)
             }.padding(.horizontal, 12).frame(minHeight: Metric.row)
         }
-        settingsGroup("Dictation", ink) {
+        settingsGroup(ink) {
             toggle("Use Claude’s dictation", model.binding({ s.transcriptionEngine == "claude" }, { s.transcriptionEngine = $0 ? "claude" : "apple" }))
             if s.transcriptionEngine == "claude" {
                 toggle("Fall back to Apple’s recognizer", model.binding({ s.appleFallback }, { s.appleFallback = $0 }))
             }
         }
-        settingsGroup("Mic buttons", ink) {
+        settingsGroup(ink) {
             HStack {
                 Text("Bottom button")
                 Spacer()
@@ -531,7 +547,15 @@ struct PanelView: View {
             }.padding(.horizontal, 12).frame(minHeight: Metric.row)
             toggle("Shake to cancel", model.binding({ s.shakeToCancel }, { s.shakeToCancel = $0 }))
         }
-        settingsGroup("General", ink) {
+        settingsGroup(ink) {
+            HStack {
+                Text("Panel")
+                Spacer()
+                Picker("", selection: $separate) {
+                    Text("One sheet").tag(false)
+                    Text("Separate pieces").tag(true)
+                }.labelsHidden().fixedSize()
+            }.padding(.horizontal, 12).frame(minHeight: Metric.row)
             toggle("Show activity in menu bar", model.binding({ s.statusBadge }, { s.statusBadge = $0 }))
             toggle("Open at login", model.binding({ SMAppService.mainApp.status == .enabled }, { on in
                 do { if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() } }
@@ -539,12 +563,48 @@ struct PanelView: View {
             }))
         }
         PanelRow(tint: ink.danger, action: { NSApp.terminate(nil) }) {
-            Image(systemName: "power").fontWeight(.semibold).frame(width: 28)
+            // Lined up with the rows above: words on the left, the control on the far right.
             Text("Quit \(AppName.display)").fontWeight(.semibold)
+            Spacer()
+            Image(systemName: "power").fontWeight(.semibold)
         }
         .foregroundStyle(ink.danger)
-        .background(RoundedRectangle(cornerRadius: Metric.inner, style: .continuous).fill(ink.danger.opacity(0.08)))
-        .padding(.top, 4)
+        .background(RoundedRectangle(cornerRadius: separate ? Metric.inner : Metric.card, style: .continuous).fill(ink.danger.opacity(0.08)))
+    }
+}
+
+/// Apple's Liquid Glass view itself, as the panel's sheet: it samples the screen behind the window and lights its own
+/// edges, which is what makes it look like the system's panels.
+private struct SystemGlass: NSViewRepresentable {
+    let radius: CGFloat
+    func makeNSView(context: Context) -> NSGlassEffectView {
+        let view = NSGlassEffectView()
+        view.style = .regular
+        view.cornerRadius = radius
+        return view
+    }
+    func updateNSView(_ view: NSGlassEffectView, context: Context) { view.cornerRadius = radius }
+}
+
+/// The card a page sits in when the panel is separate pieces; nothing on the sheet.
+private struct PageCard: ViewModifier {
+    let on: Bool
+    let tint: Color
+    func body(content: Content) -> some View {
+        if on {
+            content.padding(Metric.pad).frosted(RoundedRectangle(cornerRadius: Metric.card, style: .continuous), tint: tint)
+        } else {
+            content
+        }
+    }
+}
+
+/// The mute button's own clear glass; a plain fill on the sheet.
+private struct MuteGlass: ViewModifier {
+    @Environment(\.onSheet) private var onSheet
+    let tint: Color
+    func body(content: Content) -> some View {
+        if onSheet { content.background(tint, in: Circle()) } else { content.glassEffect(.clear.tint(tint).interactive(), in: Circle()) }
     }
 }
 
@@ -556,6 +616,7 @@ private final class KeyablePanel: NSPanel {
 /// Shows and hides the panel under the menu bar icon. It stays open while you use Claude and the mic; the icon or
 /// Esc closes it.
 final class IslandPanelController: NSObject {
+    private static let windowWidth: CGFloat = 420 + 2 * (Metric.sheetPad + Metric.sheetMargin)
     private let controller: AppController
     private let model: PanelModel
     private var panel: NSPanel?
@@ -588,7 +649,7 @@ final class IslandPanelController: NSObject {
         model.reload()
         controller.live.state = controller.state
         controller.live.usb = controller.usbLiveMain
-        let p = KeyablePanel(contentRect: NSRect(x: 0, y: 0, width: 444, height: 400),
+        let p = KeyablePanel(contentRect: NSRect(x: 0, y: 0, width: Self.windowWidth, height: 400),
                              styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         p.isOpaque = false
         p.backgroundColor = .clear
@@ -602,7 +663,7 @@ final class IslandPanelController: NSObject {
         let screen = button.window?.screen ?? NSScreen.main
         let anchor = button.window?.frame ?? .zero
         let visible = screen?.visibleFrame ?? .zero
-        top = NSPoint(x: min(anchor.midX - 222, visible.maxX - 448), y: visible.maxY)
+        top = NSPoint(x: min(anchor.midX - Self.windowWidth / 2, visible.maxX - Self.windowWidth), y: visible.maxY)
         let host = NSHostingView(rootView: PanelView(model: model, live: controller.live, island: controller.hud.model,
                                                      close: { [weak self] in self?.close() })
             .fixedSize()
@@ -612,7 +673,7 @@ final class IslandPanelController: NSObject {
         panel = p
         // As tall as the screen allows and never resized, so content only ever grows downward from the top. The empty
         // part is transparent, which lets clicks through.
-        let home = NSRect(x: top.x, y: visible.minY, width: 444, height: top.y - visible.minY)
+        let home = NSRect(x: top.x, y: visible.minY, width: Self.windowWidth, height: top.y - visible.minY)
         anchored = home.origin
         var placed = home
         if let dragged, NSScreen.screens.contains(where: { $0.visibleFrame.intersects(NSRect(origin: dragged, size: home.size).insetBy(dx: 100, dy: 0)) }) {

@@ -66,7 +66,7 @@ extension MicGesture {
 
 /// The mic as drawn in the reference, acting out the chosen gesture beside a lo-fi sketch of what it does on the Mac:
 /// the words filling Claude's composer and leaving, the panel dropping from the menu bar, macOS's orange microphone
-/// dot going away and coming back, or the app the mic switches to. The caption under them names each beat.
+/// pill going away and coming back, or the app the mic switches to. The caption under them names each beat.
 /// Out of focus the whole card goes quiet: the mic in outline, the sketch in grey.
 struct MicDemo: View {
     @Environment(\.appearsActive) private var active
@@ -286,6 +286,8 @@ struct DemoScene: View {
             case .hangUp: menuBar(&g)
             case .claude, .ko2: app(&g)
             }
+        } symbols: {
+            MicButtonGlyph(pressed: MicButtonGlyph.none, line: ink.primary, side: 18, solid: true).tag("app")
         }
         .accessibilityHidden(true)
     }
@@ -418,26 +420,50 @@ struct DemoScene: View {
         }
     }
 
-    /// A close-up of the menu bar: macOS's orange dot shows while the mic is open, and goes when it is muted.
+    /// A close-up of the menu bar as it really looks: macOS's orange microphone pill, this app's icon, Claude's, then
+    /// Wi-Fi, Control Center and the date. Muting takes the pill away and strikes this app's icon, as the real menu
+    /// bar does; nothing else changes.
     private func menuBar(_ g: inout GraphicsContext) {
         guard let index else { return }
         let label = steps[index].label
         let open: Double = label == "Muted" ? 1 - Self.ease(u / 0.35)
             : label == "Mic open" ? Self.ease(u / 0.35)
             : index < 2 ? 1 : 0
-        let pop = label == "Mic open" ? 1 + 0.5 * sin(.pi * min(1, u / 0.45)) : 1
-        g.fill(rect(4, 62, 168, 30, 9), with: .color(bar.opacity(0.6)))
-        g.stroke(rect(4, 62, 168, 30, 9), with: .color(edge), lineWidth: 1)
-        // This app's icon, then the system's: control center, wifi, clock.
-        symbol(&g, open > 0.5 ? "mic.fill" : "mic.slash.fill", 52, 77, 13, ink.primary)
-        symbol(&g, "switch.2", 100, 77, 12, ink.secondary)
-        symbol(&g, "wifi", 122, 77, 12, ink.secondary)
-        caption(&g, "9:41", 151, 77, 12, ink.secondary)
+        let pop = label == "Mic open" ? 1 + 0.18 * sin(.pi * min(1, u / 0.45)) : 1
+        let y = 80.0
+        g.fill(rect(0, y - 18, 176, 36, 9), with: .color(bar.opacity(0.6)))
+        g.stroke(rect(0, y - 18, 176, 36, 9), with: .color(edge), lineWidth: 1)
+        // The system's indicator: only there while some app has the mic.
         if open > 0 {
-            g.fill(dot(78, 77, 9 * open * pop), with: .color(orange.opacity(0.25 * open)))
-            g.fill(dot(78, 77, 4.5 * open * pop), with: .color(orange.opacity(open)))
+            var pill = g
+            pill.opacity = open
+            let w = 32 * (0.7 + 0.3 * open) * pop, h = 19 * (0.7 + 0.3 * open) * pop
+            pill.fill(rect(21 - w / 2, y - h / 2, w, h, h / 2), with: .color(orange))
+            symbol(&pill, "mic.fill", 21, y, 10 * pop, .white)
         }
-        caption(&g, open > 0.5 ? "Mic in use" : "Mic closed", 78, 112, 12, open > 0.5 ? orange : ink.secondary)
+        // This app's own icon, the one in the menu bar; muted it has a slash with a gap cut around it.
+        if let icon = g.resolveSymbol(id: "app") {
+            var slash = Path()
+            slash.move(to: CGPoint(x: 44, y: y + 8.5))
+            slash.addLine(to: CGPoint(x: 58, y: y - 8.5))
+            g.drawLayer { app in
+                app.draw(icon, at: CGPoint(x: 51, y: y))
+                guard open < 0.5 else { return }
+                var cut = app
+                cut.blendMode = .destinationOut
+                cut.stroke(slash, with: .color(.black), style: StrokeStyle(lineWidth: 3.6, lineCap: .round))
+                app.stroke(slash, with: .color(ink.primary), style: StrokeStyle(lineWidth: 1.2, lineCap: .round))
+            }
+        }
+        // Claude's icon, untouched: muting this app doesn't change it.
+        if let mark = ClaudeMark.image {
+            var image = g.resolve(Image(nsImage: mark).renderingMode(.template))
+            image.shading = .color(ink.primary)
+            g.draw(image, in: CGRect(x: 66, y: y - 9, width: 18, height: 18))
+        }
+        symbol(&g, "wifi", 97, y, 10, ink.primary)
+        symbol(&g, "switch.2", 115, y, 10, ink.primary)
+        caption(&g, "Sat 9:41", 149, y, 10.5, ink.primary)
     }
 
     /// The app the mic switches to: Claude, or the K.O. II sampler, filling in as the hold counts to three.

@@ -17,11 +17,11 @@ Tell the user what you are doing at each step; steps marked HUMAN need their han
 2. Build and install the app:
    ```
    tools/make_signing_identity.sh      # once per Mac; a self-signed identity so permission grants survive rebuilds
-   tools/make_app.sh                   # builds, signs, installs ~/Applications/FXMic.app
-   open ~/Applications/FXMic.app
+   tools/make_app.sh                   # builds, signs, installs ~/Applications/Squeeze.app
+   open ~/Applications/Squeeze.app
    ```
 3. HUMAN, in this order: allow Microphone when macOS asks; right-click the handset in the menu bar and choose
-   "Grant Accessibility access…", then enable FXMic in System Settings > Privacy & Security > Accessibility; in the
+   "Grant Accessibility access…", then enable Squeeze in System Settings > Privacy & Security > Accessibility; in the
    same menu pick the right "Input device" and turn on "Launch at login". If the headphone-jack adapter is used,
    macOS moves sound output to the jack: HUMAN reselects the speakers under System Settings > Sound > Output.
 4. Verify the Mac side without the mic: `echo "hello from fxmic" > ~/.fxmic/send.txt`. Within two seconds the text
@@ -30,7 +30,7 @@ Tell the user what you are doing at each step; steps marked HUMAN need their han
    mic's USB-C port to the Mac with a data cable. Wait until `/dev/cu.usbmodem*` exists and a volume named
    "FX MIC DISK" is mounted (`ls /dev/cu.usbmodem* /Volumes`). Then:
    ```
-   pkill -x FXMic                               # FXMic holds the mic's serial port while it runs
+   pkill -x Squeeze                               # Squeeze holds the mic's serial port while it runs
    tools/build_fxmic_script.py --from-device    # reads TE's startup script from THIS mic and writes firmware/fxmic/main.py
    tools/install_disk.sh install                # copies main.py, fxmic.py and the four marker sounds to the disk
    diskutil eject "/Volumes/FX MIC DISK"
@@ -45,8 +45,8 @@ Tell the user what you are doing at each step; steps marked HUMAN need their han
 
 - Never touch the mic's serial port with `mpremote`, `pyserial`, `screen`, or anything that toggles DTR/RTS: it
   resets the mic and drops it off USB. Use `tools/mp_exec.py` (raw REPL over a plain file descriptor).
-- FXMic reads the mic's serial console for squeeze reports (`MicSerial`): read-only, no modem-line changes, held
-  exclusively. Quit FXMic before any console tool; never make FXMic write to the port.
+- Squeeze reads the mic's serial console for squeeze reports (`MicSerial`): read-only, no modem-line changes, held
+  exclusively. Quit Squeeze before any console tool; never make Squeeze write to the port.
 - `/fat/main.py` on the mic's disk REPLACES Teenage Engineering's startup. The stub in `firmware/fxmic/boot_main.py`
   must start with `import ui; ui.callback(0)` (a stale tick callback otherwise floods errors or hard-faults after a
   soft reset). It then reads the mode from `/fat/claude/mode` and either adds `/fat/claude` to `sys.path` and imports
@@ -63,10 +63,10 @@ Tell the user what you are doing at each step; steps marked HUMAN need their han
   reformatted at the next start. TE's firmware (not in this repo) is at https://teenage.engineering/downloads/ep-2350.
 - Teenage Engineering's script, README, PDF, samples and firmware are copyrighted and git-ignored. Never commit them.
   `firmware/fxmic/main.py` is generated locally from the user's own device.
-- The app runs as a menu bar item. Rebuild and relaunch with `tools/make_app.sh && pkill -x FXMic; open ~/Applications/FXMic.app`.
+- The app runs as a menu bar item. Rebuild and relaunch with `tools/make_app.sh && pkill -x Squeeze; open ~/Applications/Squeeze.app`.
   Logs: `~/.fxmic/fxmic.log`; state: `~/.fxmic/state.json`.
 - Composer delivery works through the Accessibility API: it sets the composer text and presses the button labeled
-  "Send", never the session's "Stop" button. The one Stop-labeled control FXMic presses is Claude's dictation
+  "Send", never the session's "Stop" button. The one Stop-labeled control Squeeze presses is Claude's dictation
   control ("Stop dictation"), and only while it is listening, in the Claude-dictation mode. Session targeting presses the sidebar row titled "Idle <title>" or
   "Running <title>"; the active session is the header button described "<title>, rename session".
 

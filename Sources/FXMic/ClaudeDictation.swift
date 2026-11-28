@@ -96,6 +96,7 @@ final class ClaudeDictation {
     }
 
     private func begin(serial: Int, target: String?) -> Result<String, Failure> {
+        let startedAt = Date()
         guard AX.isTrusted else { return .failure(.notTrusted) }
         guard let app = ClaudeApp.running else { return .failure(.claudeNotRunning) }
         if ClaudeApp.showIfHidden() { Log.write("dictation: Claude was hidden, showed it behind the current app") }
@@ -115,7 +116,8 @@ final class ClaudeDictation {
         let window = found.window, composer = found.composer
 
         let labels = Settings.shared.dictationButtonLabels.map { $0.lowercased() }
-        if let finish = finishButton(near: composer, in: window) {
+        var seen = found.survey                  // one pass over the window serves everything up to the press
+        if let finish = finishButton(near: composer, among: seen) {
             Log.write("dictation: Claude was already dictating, finishing that first")
             AXUIElementPerformAction(finish, kAXPressAction as CFString)
             for _ in 0..<20 {
@@ -127,8 +129,9 @@ final class ClaudeDictation {
                 return .failure(.noButton)
             }
             Thread.sleep(forTimeInterval: 0.3)       // let the finished dictation's text settle into the composer
+            seen = AX.survey(window)
         }
-        let candidates = buttonsNear(composer, in: window).filter { el in
+        let candidates = buttonsNear(composer, among: seen).filter { el in
             let l = label(el).lowercased()
             return labels.contains { l.contains($0) } && !l.contains("voice mode") && !l.contains("cancel dictation")
         }
@@ -175,6 +178,8 @@ final class ClaudeDictation {
         let f = AX.frame(button)
         let before = composerText(composer)
         guard AXUIElementPerformAction(button, kAXPressAction as CFString) == .success else { return .failure(.noButton) }
+        // Claude hears nothing before this moment, so it is worth watching.
+        Log.write(String(format: "dictation: mic button pressed %.0f ms after the start", Date().timeIntervalSince(startedAt) * 1000))
         var current = Run(serial: serial, axApp: axApp, window: window, composer: composer,
                           buttonCenter: CGPoint(x: f.midX, y: f.midY), idleLabel: idleLabel, before: before)
         // Listening shows as a change of the button's label ("Stop dictation" and the like), or, when Claude's window is
@@ -182,8 +187,9 @@ final class ClaudeDictation {
         var nowLabel = idleLabel
         for _ in 0..<20 {
             Thread.sleep(forTimeInterval: 0.1)
-            nowLabel = buttonLabel(current) ?? idleLabel
-            if finishButton(near: composer, in: window) != nil { nowLabel = "Finish dictation"; current.labelChanged = true; current.hasFinish = true; break }
+            let now = AX.survey(window)
+            if finishButton(near: composer, among: now) != nil { nowLabel = "Finish dictation"; current.labelChanged = true; current.hasFinish = true; break }
+            nowLabel = self.button(at: current.buttonCenter, among: now).map(label) ?? idleLabel
             if nowLabel != idleLabel { current.labelChanged = true; break }
             if ClaudeApp.isUsingMic() { current.micSeen = true; break }
         }
@@ -501,28 +507,36 @@ final class ClaudeDictation {
         return AX.role(el) + (sub.isEmpty ? "" : "/" + sub)
     }
 
-    private static let pressable: Set<String> = ["AXButton", "AXCheckBox", "AXToggle", "AXMenuButton", "AXPopUpButton", "AXRadioButton"]
-
     private func buttonsNear(_ composer: AXUIElement, in window: AXUIElement) -> [AXUIElement] {
+        buttonsNear(composer, among: AX.survey(window))
+    }
+
+    private func buttonsNear(_ composer: AXUIElement, among seen: ComposerDelivery.Survey) -> [AXUIElement] {
         let cf = AX.frame(composer)
-        let panes = AX.composers(in: window).map(AX.frame)
-        return AX.find(window, depth: 0) { el in
-            guard Self.pressable.contains(AX.role(el)) else { return false }
+        let panes = AX.composers(seen).map(AX.frame)
+        return seen.controls.map(\.element).filter { el in
             let f = AX.frame(el)
             return f.width > 0 && f.maxY >= cf.minY - 60 && f.minY <= cf.maxY + 80 && AX.belongs(f, to: cf, among: panes)
         }
     }
 
     private func finishButton(near composer: AXUIElement, in window: AXUIElement) -> AXUIElement? {
-        buttonsNear(composer, in: window).first { label($0).lowercased().contains("finish dictation") }
+        finishButton(near: composer, among: AX.survey(window))
+    }
+
+    private func finishButton(near composer: AXUIElement, among seen: ComposerDelivery.Survey) -> AXUIElement? {
+        buttonsNear(composer, among: seen).first { label($0).lowercased().contains("finish dictation") }
     }
 
     private func button(at center: CGPoint, in window: AXUIElement) -> AXUIElement? {
-        AX.find(window, depth: 0) { el in
-            guard Self.pressable.contains(AX.role(el)) else { return false }
+        button(at: center, among: AX.survey(window))
+    }
+
+    private func button(at center: CGPoint, among seen: ComposerDelivery.Survey) -> AXUIElement? {
+        seen.controls.map(\.element).first { el in
             let f = AX.frame(el)
             return abs(f.midX - center.x) < 6 && abs(f.midY - center.y) < 6
-        }.first
+        }
     }
 
     private func buttonLabel(_ r: Run) -> String? { button(at: r.buttonCenter, in: r.window).map(label) }

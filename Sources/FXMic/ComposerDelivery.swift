@@ -53,8 +53,31 @@ enum ComposerDelivery {
     /// The window's composers, best match first. Code sessions describe it "Prompt"; other views (a project's thread,
     /// a plain chat) describe it otherwise, so there any editable text area with Send or Claude's dictation button
     /// beside it counts. A search field never does.
-    static func composers(in window: AXUIElement) -> [AXUIElement] {
-        let texts = find(window, depth: 0) { ["AXTextArea", "AXTextField"].contains(role($0)) }
+    static func composers(in window: AXUIElement) -> [AXUIElement] { composers(survey(window)) }
+
+    /// The window's text fields and controls, collected in one pass. Each pass costs a few hundred milliseconds in a
+    /// long conversation, and every one made before pressing the mic button is speech Claude doesn't hear.
+    struct Survey {
+        var texts: [AXUIElement] = []
+        var controls: [(element: AXUIElement, role: String)] = []
+    }
+
+    static let controlRoles: Set<String> = ["AXButton", "AXCheckBox", "AXToggle", "AXMenuButton", "AXPopUpButton", "AXRadioButton"]
+
+    static func survey(_ window: AXUIElement) -> Survey {
+        var out = Survey()
+        func walk(_ el: AXUIElement, _ depth: Int) {
+            let r = role(el)
+            if r == "AXTextArea" || r == "AXTextField" { out.texts.append(el) }
+            if controlRoles.contains(r) { out.controls.append((el, r)) }
+            if depth < 80 { for child in children(el) { walk(child, depth + 1) } }
+        }
+        walk(window, 0)
+        return out
+    }
+
+    static func composers(_ survey: Survey) -> [AXUIElement] {
+        let texts = survey.texts
         let prompt = texts.filter { role($0) == "AXTextArea" && string($0, kAXDescriptionAttribute) == "Prompt" }
         if !prompt.isEmpty { return prompt }
         let editable = texts.filter { el in
@@ -64,8 +87,7 @@ enum ComposerDelivery {
         }
         guard !editable.isEmpty else { return [] }
         let markers = Settings.shared.dictationButtonLabels.map { $0.lowercased() }
-        let beside = find(window, depth: 0) { el in
-            guard role(el) == "AXButton" else { return false }
+        let beside = survey.controls.filter { $0.role == "AXButton" }.map(\.element).filter { el in
             let d = string(el, kAXDescriptionAttribute), t = string(el, kAXTitleAttribute)
             if d == "Send" || t == "Send" { return true }
             let l = (d + " " + t + " " + string(el, kAXHelpAttribute)).lowercased()
@@ -210,14 +232,16 @@ enum ComposerDelivery {
     }
 
     /// The main window and its composer: the focused one when there are several (a side chat is open), else the
-    /// first. The tree can take ~2 s to appear the first time.
-    static func locateComposer(_ axApp: AXUIElement, attempts: Int = 12) -> (window: AXUIElement, composer: AXUIElement)? {
+    /// first. The tree can take ~2 s to appear the first time. `survey` is what the same pass saw.
+    static func locateComposer(_ axApp: AXUIElement, attempts: Int = 12) -> (window: AXUIElement, composer: AXUIElement, survey: Survey)? {
         for attempt in 0..<attempts {
             let windows = (attribute(axApp, kAXWindowsAttribute) as? [AXUIElement]) ?? []
-            if let main = (attribute(axApp, kAXMainWindowAttribute) as! AXUIElement?) ?? windows.first,
-               case let found = composers(in: main),
-               let composer = found.first(where: { (attribute($0, kAXFocusedAttribute) as? Bool) == true }) ?? found.first {
-                return (main, composer)
+            if let main = (attribute(axApp, kAXMainWindowAttribute) as! AXUIElement?) ?? windows.first {
+                let seen = survey(main)
+                let found = composers(seen)
+                if let composer = found.first(where: { (attribute($0, kAXFocusedAttribute) as? Bool) == true }) ?? found.first {
+                    return (main, composer, seen)
+                }
             }
             if attempt < attempts - 1 { Thread.sleep(forTimeInterval: 0.25) }
         }

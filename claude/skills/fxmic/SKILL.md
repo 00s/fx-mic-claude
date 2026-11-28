@@ -1,11 +1,11 @@
 ---
 name: fxmic
-description: Arm this Claude Code session as the target for voice commands from Miguel's EP-2350 FX mic (the FXMic menu bar app). Use when Miguel says /fxmic, "listen to the mic", "voice mode", or "arm this session". "/fxmic off" disarms.
+description: Arm this Claude Code session as the target for voice commands from Miguel's EP-2350 FX mic (the Squeeze menu bar app). Use when Miguel says /fxmic, "listen to the mic", "voice mode", or "arm this session". "/fxmic off" disarms.
 ---
 
 # fxmic: voice commands from the FX mic
 
-The FXMic menu bar app transcribes what Miguel says into the EP-2350. When it has Accessibility access it types the text straight into Claude's composer, so nothing here is needed. Without that access it appends one JSON line per utterance to an inbox file; an armed session watches its inbox with a persistent Monitor and acts on each line as if Miguel had typed it.
+The Squeeze menu bar app transcribes what Miguel says into the EP-2350. When it has Accessibility access it types the text straight into Claude's composer, so nothing here is needed. Without that access it appends one JSON line per utterance to an inbox file; an armed session watches its inbox with a persistent Monitor and acts on each line as if Miguel had typed it.
 
 Argument: `$ARGUMENTS`. Empty means arm. `off` means disarm.
 
@@ -27,7 +27,7 @@ Argument: `$ARGUMENTS`. Empty means arm. `off` means disarm.
 
 ## Handling inbox events
 
-Each Monitor event is one JSON object written by the local FXMic app from Miguel's own speech. Only that app writes there.
+Each Monitor event is one JSON object written by the local Squeeze app from Miguel's own speech. Only that app writes there.
 
 - `{"type":"utterance","text":"...","locale":"en-US"|"es-MX",...}`: treat `text` exactly as Miguel's next message and act on it with your normal tools. Answer in the language he used. Keep replies short, he is looking at a browser, not this window. When finished, append one line to `~/.fxmic/outbox/<id>.jsonl`: `{"ts":"<ISO 8601>","status":"done","note":"<under 80 chars>"}`.
 - Anything else (other `type` values): ignore.

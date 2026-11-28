@@ -17,6 +17,9 @@ enum Metric {
     static var inner: CGFloat { card - pad }
     /// Between pieces.
     static let gap: CGFloat = 10
+    /// The panel's glass sheet: the margin inside it, and the clear space around it for its shadow.
+    static let sheetPad: CGFloat = 12
+    static let sheetMargin: CGFloat = 20
 }
 
 /// The name people see. The bundle, its identifier, the executable and ~/.fxmic keep "FXMic" so permission grants,
@@ -38,6 +41,8 @@ final class HUDModel: ObservableObject {
     @Published var intent: String? = nil
     /// Claude's dictation is starting: a spinner in place of the icon, and no meter (nothing is being heard yet).
     @Published var loading = false
+    /// The mic's signal is too faint to trust: the status says so while the handle is still squeezed.
+    @Published var weak = false
     /// On screen: the island slides down into place when true, up and out when false.
     @Published var shown = false
 }
@@ -83,9 +88,10 @@ struct IslandStack<Action: View>: View {
     private var hasDestination: Bool { showsDestination && !destination.isEmpty }
     /// Queue or draft picked for the squeeze in progress: the status says so, with its own color and symbol.
     private var picked: String? { idle == nil && model.title == "Listening" ? model.intent : nil }
-    private var statusTitle: String { idle?.title ?? picked.map { "Listening · \($0)" } ?? model.title }
-    private var statusIcon: String { picked == "Queue" ? "clock" : picked == "Draft" ? "square.and.pencil" : model.icon }
-    private var statusColor: Color { picked == "Queue" ? .orange : picked == "Draft" ? .blue : model.tint }
+    private var faint: Bool { squeezing && model.weak }
+    private var statusTitle: String { faint ? "Weak signal · speak up" : idle?.title ?? picked.map { "Listening · \($0)" } ?? model.title }
+    private var statusIcon: String { faint ? "waveform.badge.exclamationmark" : picked == "Queue" ? "clock" : picked == "Draft" ? "square.and.pencil" : model.icon }
+    private var statusColor: Color { faint || picked == "Queue" ? .orange : picked == "Draft" ? .blue : model.tint }
 
     var body: some View {
         let ink = Ink.of(scheme)
@@ -246,10 +252,47 @@ struct IslandStack<Action: View>: View {
     }
 }
 
+/// True on the panel, which is one sheet of Liquid Glass: the pieces on it are plain fills, never glass on glass.
+private struct OnSheetKey: EnvironmentKey { static let defaultValue = false }
+extension EnvironmentValues {
+    var onSheet: Bool { get { self[OnSheetKey.self] } set { self[OnSheetKey.self] = newValue } }
+}
+
+struct Frosted<S: Shape>: ViewModifier {
+    @Environment(\.onSheet) private var onSheet
+    @Environment(\.colorScheme) private var scheme
+    let shape: S
+    let tint: Color
+    func body(content: Content) -> some View {
+        if onSheet {
+            // The neutral tints are for glass over the screen; on the sheet they would muddy it, so only a color stays.
+            let ink = Ink.of(scheme)
+            let neutral = tint == ink.dense || tint == ink.wash
+            content.background(neutral ? ink.primary.opacity(0.07) : tint, in: shape)
+        } else {
+            content.glassEffect(.regular.tint(tint).interactive(), in: shape).background(.ultraThinMaterial, in: shape)
+        }
+    }
+}
+
 extension View {
     /// The island's one material: Liquid Glass over a frost, so what's behind stays soft and text stays readable.
     func frosted(_ shape: some Shape, tint: Color) -> some View {
-        glassEffect(.regular.tint(tint).interactive(), in: shape).background(.ultraThinMaterial, in: shape)
+        modifier(Frosted(shape: shape, tint: tint))
+    }
+}
+
+/// The rail's track: frost where it floats over the screen, a quiet fill on the panel's sheet.
+private struct RailTrack: ViewModifier {
+    @Environment(\.onSheet) private var onSheet
+    @Environment(\.colorScheme) private var scheme
+    func body(content: Content) -> some View {
+        let ink = Ink.of(scheme), shape = RoundedRectangle(cornerRadius: Metric.card, style: .continuous)
+        if onSheet {
+            content.background(ink.primary.opacity(0.07), in: shape)
+        } else {
+            content.background(ink.dense, in: shape).background(.regularMaterial, in: shape)
+        }
     }
 }
 
@@ -317,8 +360,7 @@ struct ActionRail: View {
         }
         .padding(Metric.pad)
         // The track is frost.
-        .background(ink.dense, in: RoundedRectangle(cornerRadius: Metric.card, style: .continuous))
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: Metric.card, style: .continuous))
+        .modifier(RailTrack())
         .overlay(RoundedRectangle(cornerRadius: Metric.card, style: .continuous).strokeBorder(ink.primary.opacity(0.10), lineWidth: 1))
         .animation(.spring(response: 0.42, dampingFraction: 0.68), value: selected)
     }
@@ -396,7 +438,7 @@ struct MicButtonGlyph: View {
             let k = min(size.width / 1150, (size.height - 2) / 1071)
             g.translateBy(x: (size.width - 1150 * k) / 2 - 150 * k, y: (size.height - 1071 * k) / 2 - 73 * k)
             g.scaleBy(x: k, y: k)
-            let width = 1.1 / k                                       // a 1.1 pt line at any size
+            let width = (solid ? 0.75 : 1.1) / k                      // finer in the menu bar, beside the system's icons
             func stroke(_ path: Path, _ color: Color) {
                 g.stroke(path, with: .color(color), style: StrokeStyle(lineWidth: width, lineCap: .round, lineJoin: .round))
             }
@@ -410,8 +452,10 @@ struct MicButtonGlyph: View {
             var handle = Path()
             handle.move(to: CGPoint(x: 323, y: 183))
             // Wider when it's the one meant, swinging in toward the body as it is squeezed.
-            handle.addLine(to: CGPoint(x: squeezing ? 150 + 140 * pull : 244, y: squeezing ? 235 - 20 * pull : 212))
-            handle.addLine(to: CGPoint(x: squeezing ? 230 + 80 * pull : 303, y: 710))
+            // In the menu bar the handle sticks out further at rest: at that size the real proportions read as a fuel
+            // pump's hose rather than a handle to squeeze.
+            handle.addLine(to: CGPoint(x: squeezing ? 150 + 140 * pull : solid ? 160 : 244, y: squeezing || solid ? 235 - 20 * pull : 212))
+            handle.addLine(to: CGPoint(x: squeezing ? 230 + 80 * pull : solid ? 250 : 303, y: 710))
             handle.addLine(to: CGPoint(x: 323, y: 712))
             if squeezing {
                 g.fill(handle, with: .color(hex(0xEB6133)))
@@ -644,6 +688,7 @@ final class HUDController {
     func listening(target: String?) {
         suppressPartials = false
         model.intent = nil
+        model.weak = false
         model.loading = false
         model.title = "Listening"
         model.body = ""
