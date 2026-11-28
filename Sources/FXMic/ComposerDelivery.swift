@@ -43,9 +43,9 @@ enum ComposerDelivery {
 
     /// Title of the session shown in the window, read from its "…, rename session" header button.
     static func activeSessionTitle(in window: AXUIElement) -> String? {
-        for el in find(window, depth: 0, { role($0) == "AXButton" }) {
-            let d = string(el, kAXDescriptionAttribute)
-            if let suffix = renameSuffixes.first(where: { d.hasSuffix($0) }) { return String(d.dropLast(suffix.count)) }
+        let names = find(window, depth: 0) { role($0) == "AXButton" }.map { string($0, kAXDescriptionAttribute) }
+        for suffix in renameSuffixes {
+            if let d = names.first(where: { $0.hasSuffix(suffix) }) { return String(d.dropLast(suffix.count)) }
         }
         return nil
     }
@@ -71,9 +71,15 @@ enum ComposerDelivery {
             let l = (d + " " + t + " " + string(el, kAXHelpAttribute)).lowercased()
             return markers.contains { l.contains($0) }
         }.map(frame)
+        // Beside it in both directions, so a field in another pane at the same height doesn't count, and writable.
         return editable.filter { el in
+            var writable = DarwinBoolean(false)
+            guard AXUIElementIsAttributeSettable(el, kAXValueAttribute as CFString, &writable) == .success, writable.boolValue
+            else { return false }
             let tf = frame(el)
-            return beside.contains { $0.maxY >= tf.minY - 60 && $0.minY <= tf.maxY + 80 }
+            return beside.contains {
+                $0.maxY >= tf.minY - 60 && $0.minY <= tf.maxY + 80 && $0.midX >= tf.minX - 80 && $0.midX <= tf.maxX + 80
+            }
         }
     }
 
