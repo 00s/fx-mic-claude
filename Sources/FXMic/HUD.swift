@@ -71,10 +71,6 @@ struct IslandStack<Action: View>: View {
     var onUnpin: (() -> Void)? = nil
     /// Off where the pinned list is right there: one pin per conversation on screen is enough.
     var showsPin = true
-    /// Between messages, in the panel: the "Send to" line opens a menu of conversations. Nil keeps it a plain line.
-    var destinations: (pins: [String], recent: [String]?)? = nil
-    var onDestination: ((String?) -> Void)? = nil
-    var onDestinationMenu: (() -> Void)? = nil
     /// Placed under the words (the panel's page buttons): the words always read above the controls.
     var fixed: AnyView? = nil
     /// The panel's gestures page keeps the squeeze rail on screen all the time; between squeezes a tap picks which gesture the drawing plays.
@@ -158,7 +154,8 @@ struct IslandStack<Action: View>: View {
                 if active && model.loading {
                     ProgressView().controlSize(.small)
                 } else if idle?.live == true {
-                    MicButtonGlyph(pressed: MicButtonGlyph.none, line: ink.secondary)
+                    // The same squeeze-and-let-go loop as the rail's "Release to send": how to start a message.
+                    MovingGlyph(kind: .release, line: ink.secondary)
                 } else {
                     Image(systemName: idle?.icon ?? statusIcon).font(.system(size: 20, weight: .medium)).foregroundStyle(tint)
                 }
@@ -203,46 +200,12 @@ struct IslandStack<Action: View>: View {
             .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { wordsMeasured = $0 }
     }
 
-    /// The conversation name opens the same choices as the Chats page: the one on screen, the pins, then the rest.
-    private func destinationMenu(_ list: (pins: [String], recent: [String]?), _ pick: @escaping (String?) -> Void,
-                                 _ ink: Ink) -> some View {
-        Menu {
-            Button("Conversation on screen") { pick(nil) }
-            if !list.pins.isEmpty {
-                Divider()
-                ForEach(list.pins, id: \.self) { chat in Button(chat) { pick(chat) } }
-            }
-            if let recent = list.recent {
-                let rest = recent.filter { !list.pins.contains($0) }.prefix(12)
-                if !rest.isEmpty {
-                    Divider()
-                    ForEach(Array(rest), id: \.self) { chat in Button(chat) { pick(chat) } }
-                }
-            }
-        } label: {
-            HStack(spacing: 4) {
-                Text(destination).foregroundStyle(ink.primary).lineLimit(1).truncationMode(.tail)
-                Image(systemName: "chevron.up.chevron.down").font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(ink.secondary)
-            }
-            .contentShape(Rectangle())
-        }
-        .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
-        .simultaneousGesture(TapGesture().onEnded { onDestinationMenu?() })
-        .accessibilityLabel("Send to \(destination)")
-        .accessibilityHint("Picks the conversation")
-    }
-
     private func transcript(_ ink: Ink) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             if hasDestination {
                 HStack(spacing: 6) {
                     Text("Send to")
-                    if idle != nil, let destinations, let onDestination {
-                        destinationMenu(destinations, onDestination, ink)
-                    } else {
-                        Text(destination).foregroundStyle(ink.primary).lineLimit(1).truncationMode(.tail)
-                    }
+                    Text(destination).foregroundStyle(ink.primary).lineLimit(1).truncationMode(.tail)
                     Spacer(minLength: 4)
                     if showsPin && Settings.shared.targetSessionTitle != nil {
                         // One control says both things: it's pinned (the pin) and a click unpins (on hover).
@@ -650,11 +613,12 @@ extension Color {
     static let unmuteGlass = Color(.sRGB, red: 0.08, green: 0.50, blue: 0.24, opacity: 1)
 }
 
-/// The app's two typefaces, bundled (fonts/): Inter Tight for what you read and click, JetBrains Mono for the
-/// device-readout captions and states. SF Symbols keep the system font.
+/// The app's type, from its design system: Apple's own fonts only, SF Pro for what you read and click and SF Mono for
+/// the device-readout captions and states. Every text style goes through these two; tools/check_design.sh fails the
+/// build if a bundled or named font comes back.
 extension Font {
-    static func ui(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font { .custom("Inter Tight", fixedSize: size).weight(weight) }
-    static func mono(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font { .custom("JetBrains Mono", fixedSize: size).weight(weight) }
+    static func ui(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font { .system(size: size, weight: weight) }
+    static func mono(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font { .system(size: size, weight: weight, design: .monospaced) }
 }
 
 /// The island never takes focus, so its first click must act instead of only bringing the window forward.

@@ -314,9 +314,6 @@ struct PanelView: View {
                     idleDestination: off ? nil : model.selected ?? model.onScreen ?? "Conversation on screen",
                     onUnpin: { model.select(nil) },
                     showsPin: model.page != .pick,
-                    destinations: (model.pins, model.pickable),
-                    onDestination: { model.select($0) },
-                    onDestinationMenu: { if model.pickable == nil { model.loadPickable() } },
                     fixed: AnyView(HStack(spacing: 8) {
                         switcher(.pick, "Chats", nil, ink)
                         switcher(.gestures, "Gestures", "hand.point.up.left", ink)
@@ -499,8 +496,10 @@ struct PanelView: View {
 
     /// One group of settings in its own rounded container; the rows say what they are, so it carries no title.
     func settingsGroup<Rows: View>(_ ink: Ink, @ViewBuilder _ rows: () -> Rows) -> some View {
+        // The rows sit Metric.pad in from the group's edge, like rows in every other card, so the words start clear of
+        // the 26 pt corner (20 pt in all) without the rows growing taller.
         VStack(spacing: 0) { rows() }
-            .padding(.vertical, 4)
+            .padding(.vertical, 4).padding(.horizontal, Metric.pad)
             .background(RoundedRectangle(cornerRadius: separate ? Metric.inner : Metric.card, style: .continuous).fill(ink.primary.opacity(0.07)))
     }
 
@@ -567,9 +566,9 @@ struct PanelView: View {
         }
         PanelRow(tint: ink.danger, action: { NSApp.terminate(nil) }) {
             // Lined up with the rows above: words on the left, the control on the far right.
-            Text("Quit \(AppName.display)").fontWeight(.semibold)
+            Text("Quit \(AppName.display)").fontWeight(.semibold).padding(.leading, Metric.pad)
             Spacer()
-            Image(systemName: "power").fontWeight(.semibold)
+            Image(systemName: "power").fontWeight(.semibold).padding(.trailing, Metric.pad)
         }
         .foregroundStyle(ink.danger)
         .background(RoundedRectangle(cornerRadius: separate ? Metric.inner : Metric.card, style: .continuous).fill(ink.danger.opacity(0.08)))
@@ -650,7 +649,6 @@ final class IslandPanelController: NSObject {
     private func open(under button: NSStatusBarButton) {
         model.page = .main
         model.reload()
-        model.loadPickable()                // for the island's "Send to" menu
         controller.live.state = controller.state
         controller.live.usb = controller.usbLiveMain
         let p = KeyablePanel(contentRect: NSRect(x: 0, y: 0, width: Self.windowWidth, height: 400),

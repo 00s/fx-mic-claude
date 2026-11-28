@@ -70,6 +70,16 @@ Tell the user what you are doing at each step; steps marked HUMAN need their han
   control ("Stop dictation"), and only while it is listening, in the Claude-dictation mode. Session targeting presses the sidebar row titled "Idle <title>" or
   "Running <title>"; the active session is the header button described "<title>, rename session".
 
+## Design system
+
+- Type: Apple's fonts only. SF Pro for everything you read and click, SF Mono for device readouts and states, always
+  through `Font.ui` and `Font.mono` (`Sources/FXMic/HUD.swift`); never `.custom` fonts, `NSFont(name:)` or bundled font
+  files. `tools/check_design.sh` enforces this and `tools/make_app.sh` runs it first, so a build fails if one comes
+  back. Changing the type is a design-system decision the user makes: then update the check, this section and the two
+  functions together.
+- Shapes: sizes and radii come from `Metric` (`HUD.swift`). Rows inside a card sit `Metric.pad` in from its edge and
+  use `Metric.inner` corners, concentric with the card's `Metric.card`.
+
 ## Layout
 
 `Sources/FXMicCore` (audio, tone detection, transcription), `Sources/FXMic` (menu bar app), `Sources/fxmic-cal`
