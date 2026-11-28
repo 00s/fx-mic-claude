@@ -10,6 +10,19 @@ your words land in the Claude desktop app as your own message.
 Squeeze is a menu bar app for macOS 26, plus a small script on the mic's own disk. Tested with an EP-2350 FX mic on
 OS 1.1.2. MIT licensed; nothing from Teenage Engineering is redistributed.
 
+## How it works
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/how-dark.png">
+  <img alt="Three steps: you squeeze, and the mic marks it with a tone or over USB; the app listens, and Apple's recognizer or Claude's dictation writes the words; Claude gets them, typed into the composer and sent as your message." src="docs/images/how-light.png" width="720">
+</picture>
+
+The mic sends nothing but sound, so its script plays short tones above speech when you squeeze, let go, shake or
+press a button. On a USB-C data cable it also reports them over USB, and the Mac's input stays closed between
+squeezes. Claude's dictation is more accurate than Apple's on-device recognizer (English and Spanish).
+
+[PLAN.md](PLAN.md) is the engineering log with every measurement and dead end.
+
 ## Gestures
 
 <picture>
@@ -45,19 +58,6 @@ starting to listen.
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/states-dark.png">
   <img alt="Island states: Starting (grey), Sent (green), Listening · Queue (orange), Nothing to send, Listening · Draft (blue), Canceled." src="docs/images/states-light.png" width="640">
 </picture>
-
-## How it works
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/how-dark.png">
-  <img alt="Three steps: you squeeze, and the mic marks it with a tone or over USB; the app listens, and Apple's recognizer or Claude's dictation writes the words; Claude gets them, typed into the composer and sent as your message." src="docs/images/how-light.png" width="720">
-</picture>
-
-The mic sends nothing but sound, so its script plays short tones above speech when you squeeze, let go, shake or
-press a button. On a USB-C data cable it also reports them over USB, and the Mac's input stays closed between
-squeezes. Claude's dictation is more accurate than Apple's on-device recognizer (English and Spanish).
-
-[PLAN.md](PLAN.md) is the engineering log with every measurement and dead end.
 
 ## What you need
 
