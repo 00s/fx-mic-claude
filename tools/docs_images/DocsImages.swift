@@ -66,6 +66,7 @@ import SwiftUI
         .environment(\.onSheet, true).environment(\.colorScheme, s)
         .padding(28).background(bg).foregroundStyle(ink.primary).font(.ui(14))
         png(rails, "\(dir)/gestures-\(name).png")
+        png(howItWorks(s), "\(dir)/how-\(name).png")
     }
     // Gesture demos as frames, for GIFs: the mic acting out each gesture beside what it does on the Mac.
     for g in [MicGesture.send, .queue, .draft, .cancel] {
@@ -202,3 +203,49 @@ import SwiftUI
     print("hero written")
 }
 
+
+// MARK: how it works: three steps, left to right, in the rails' style.
+
+@MainActor func howItWorks(_ s: ColorScheme) -> some View {
+    let ink = Ink.of(s), line = ink.secondary
+    let fill = ink.primary.opacity(0.07)
+    func step(_ n: String, _ title: String, _ detail: String, @ViewBuilder _ art: () -> some View) -> some View {
+        VStack(spacing: 14) {
+            art().frame(height: 64)
+            VStack(spacing: 4) {
+                Text(title).font(.ui(15, .semibold)).foregroundStyle(ink.primary)
+                Text(detail).font(.ui(13)).foregroundStyle(ink.secondary).multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.vertical, 22).padding(.horizontal, 14).frame(width: 220, height: 190)
+        .background(RoundedRectangle(cornerRadius: Metric.card, style: .continuous).fill(fill))
+    }
+    let arrow = Image(systemName: "chevron.right").font(.system(size: 16, weight: .semibold)).foregroundStyle(line.opacity(0.7))
+    let yellow = s == .dark ? Color.yellow : Color(.sRGB, red: 0.80, green: 0.60, blue: 0.0, opacity: 1)
+    return HStack(spacing: 14) {
+        step("1", "You squeeze", "The mic marks it with a tone, or over USB") {
+            MicButtonGlyph(pressed: MicButtonGlyph.squeeze, line: line, side: 64, pull: 0.6).frame(width: 64, height: 64)
+        }
+        arrow
+        step("2", "The app listens", "Apple's recognizer or Claude's dictation writes the words") {
+            HStack(spacing: 8) {
+                Image(systemName: "mic.fill").font(.system(size: 18, weight: .medium)).foregroundStyle(yellow)
+                Text("Listening").font(.ui(16, .semibold)).foregroundStyle(ink.primary)
+            }
+            .padding(.horizontal, 18).frame(height: 44)
+            .background(Capsule().fill(yellow.opacity(0.22)))
+        }
+        arrow
+        step("3", "Claude gets it", "Typed into the composer and sent as your message") {
+            HStack(spacing: 10) {
+                Capsule().fill(ink.secondary.opacity(0.35)).frame(width: 96, height: 8)
+                Circle().fill(Color(red: 0.85, green: 0.47, blue: 0.34)).frame(width: 26, height: 26)
+                    .overlay(Image(systemName: "arrow.up").font(.system(size: 12, weight: .bold)).foregroundStyle(.white))
+            }
+            .padding(.leading, 16).padding(.trailing, 9).frame(height: 44)
+            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(ink.secondary.opacity(0.35)))
+        }
+    }
+    .padding(28).background(s == .dark ? Color(white: 0.13) : Color(white: 0.96))
+}

@@ -48,19 +48,14 @@ starting to listen.
 
 ## How it works
 
-```mermaid
-flowchart LR
-  mic["EP-2350<br/>script on its disk"] -- "tones on the audio line<br/>or reports over USB" --> app["Squeeze<br/>menu bar app"]
-  app -- "voice" --> stt["Apple's recognizer<br/>or Claude's dictation"]
-  stt --> claude["Claude's composer<br/>(Accessibility)"]
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/how-dark.png">
+  <img alt="Three steps: you squeeze, and the mic marks it with a tone or over USB; the app listens, and Apple's recognizer or Claude's dictation writes the words; Claude gets them, typed into the composer and sent as your message." src="docs/images/how-light.png" width="720">
+</picture>
 
-The mic sends nothing but sound, so its script plays short marker tones above speech when you squeeze, let go, shake
-or press a button. Squeeze listens for them on the input device. With the mic also on a USB-C data cable, the
-script reports the same events over USB and Squeeze keeps the Mac's input closed between squeezes.
-
-The words come from Apple's on-device recognizer (English and Spanish), or from Claude's own dictation, which is
-more accurate. Squeeze then types them into Claude's composer and presses Send, the same as you would.
+The mic sends nothing but sound, so its script plays short tones above speech when you squeeze, let go, shake or
+press a button. On a USB-C data cable it also reports them over USB, and the Mac's input stays closed between
+squeezes. Claude's dictation is more accurate than Apple's on-device recognizer (English and Spanish).
 
 [PLAN.md](PLAN.md) is the engineering log with every measurement and dead end.
 
