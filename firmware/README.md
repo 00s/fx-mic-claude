@@ -1,16 +1,21 @@
 # firmware
 
-Nothing from Teenage Engineering ships in this repository. The mic's own startup script is read from **your**
+What goes on the mic. Nothing from Teenage Engineering ships here: the mic's own startup script is read from **your**
 device and patched locally.
 
-- `tools/build_fxmic_script.py --from-device` reads `/rom/main.py` from the mic over its serial console and writes
-  `firmware/fxmic/main.py` (git-ignored): TE's startup plus handle markers, shake-to-cancel, and the play button
-  pinned to slot 1. It is installed on the mic's disk as `fxmic.py` by `tools/install_disk.sh install`.
-- `fxmic/boot_main.py` is the two-line boot stub installed as `main.py` on the disk: clear the tick callback, add
-  `/fat` to the module path, import `fxmic`. The order matters, see PLAN.md, "Firmware route".
-- `te/escape_blank_disk.uf2` (regenerate with `tools/make_escape_uf2.py`) blanks the disk's first 8 KB so the
-  firmware reformats it at the next start. Enter the bootloader with the handle held and a double-click on the small
-  button above the USB port; a drive called "FX MIC BOOT" appears; drag the file onto it.
-- TE's firmware for OS 1.1.2 is at https://teenage.engineering/downloads/ep-2350 if you ever need to reflash. Its
-  UF2 covers the program and the script partition, not the disk.
-- Never run `mpremote` against the mic's serial port: it toggles DTR/RTS and resets the device. Use `tools/mp_exec.py`.
+| File | On the mic's disk | What it is |
+| --- | --- | --- |
+| `fxmic/boot_main.py` | `main.py` | The boot stub. Reads the saved mode from `claude/mode` and starts Claude mode (`claude/fxmic.py`) or TE's own startup. Also watches for the 3 s holds that switch modes. |
+| `fxmic/main.py` (git-ignored) | `claude/fxmic.py` | TE's startup script plus the marker tones, shake to cancel, the queue and draft buttons, and the USB reports. Written by `tools/build_fxmic_script.py --from-device`. |
+| `te/escape_blank_disk.uf2` | (bootloader only) | Blanks the disk's first 8 KB, so the mic reformats it at the next start. Rebuild it with `tools/make_escape_uf2.py`. |
+
+`tools/install_disk.sh install` copies both scripts, `config.json` and the marker sounds into place;
+`tools/install_disk.sh remove` makes the mic stock again. The disk root never holds `config.json` or marker sounds, so
+factory mode loads TE's own.
+
+**Recovery.** If a script stops the mic from starting: hold the handle and double-click the small button above the
+USB port. A drive called "FX MIC BOOT" appears; drag `te/escape_blank_disk.uf2` onto it. TE's firmware is at
+https://teenage.engineering/downloads/ep-2350 if you need a full reflash; it doesn't touch the disk.
+
+**Never** run `mpremote` or pyserial tools against the mic's serial port: they toggle DTR/RTS and reset it. Use
+`tools/mp_exec.py`. Why the boot stub is written the way it is: [PLAN.md](../PLAN.md), "Firmware route".

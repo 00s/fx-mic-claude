@@ -1,0 +1,194 @@
+import AppKit
+import SwiftUI
+
+@MainActor func png(_ view: some View, _ out: String, scale: CGFloat = 2) {
+    let r = ImageRenderer(content: view); r.scale = scale
+    guard let img = r.cgImage else { print("render failed \(out)"); return }
+    let rep = NSBitmapImageRep(cgImage: img)
+    try! rep.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: out))
+}
+
+@MainActor func island(_ s: ColorScheme, _ set: (HUDModel) -> Void) -> some View {
+    let m = HUDModel(); m.shown = true; m.showMeter = false; set(m)
+    return IslandStack(model: m) { EmptyView() }.environment(\.onSheet, true).environment(\.colorScheme, s)
+}
+
+@MainActor func docs(_ dir: String) {
+    let words = "Let's add a dark mode toggle to the settings page, next to the font size"
+    for s in [ColorScheme.light, .dark] {
+        let ink = Ink.of(s), bg = s == .dark ? Color(white: 0.13) : Color(white: 0.96), name = s == .dark ? "dark" : "light"
+        // The island while squeezing, and the states around it.
+        let listening = island(s) { m in m.title = "Listening"; m.tint = .yellow; m.icon = "mic.fill"; m.showMeter = true; m.level = -22
+            m.body = words; m.footer = "Settings redesign" }
+        let small: [(HUDModel) -> Void] = [
+            { m in m.title = "Starting…"; m.tint = .gray; m.icon = "mic" },
+            { m in m.title = "Listening"; m.tint = .yellow; m.icon = "mic.fill"; m.intent = "Queue"; m.showMeter = true; m.level = -30 },
+            { m in m.title = "Listening"; m.tint = .yellow; m.icon = "mic.fill"; m.intent = "Draft"; m.showMeter = true; m.level = -30 },
+            { m in m.title = "Sent"; m.tint = .green; m.icon = "checkmark.circle.fill" },
+            { m in m.title = "Nothing to send"; m.tint = .gray; m.icon = "waveform.slash" },
+            { m in m.title = "Canceled"; m.tint = .gray; m.icon = "xmark.circle" },
+        ]
+        let order = [0, 3, 1, 4, 2, 5]   // Starting, Sent / Queue, Nothing to send / Draft, Canceled
+        let states = VStack(spacing: 12) {
+            ForEach(0..<3, id: \.self) { r in
+                HStack(spacing: 16) {
+                    // Room around each pill: Queue and Draft grow a little with their level glow, so a crop at the pill's own
+                    // size would cut their ends. The crop still stops above the rail.
+                    ForEach(0..<2, id: \.self) { c in
+                        island(s, small[order[r * 2 + c]]).padding(.horizontal, 10).padding(.top, 4)
+                            .frame(height: 64, alignment: .top).clipped()
+                    }
+                }
+            }
+        }
+        .padding(28).background(bg).foregroundStyle(ink.primary).font(.ui(14))
+        png(states, "\(dir)/states-\(name).png")
+        // The gestures: while squeezing, and with the handle released.
+        let line = ink.secondary
+        let squeezeRail = ActionRail(items: [
+            RailItem("Release\nto send") { MicButtonGlyph(pressed: MicButtonGlyph.squeeze, line: line, pull: 0.5) },
+            RailItem("Top to\nqueue") { MicButtonGlyph(pressed: 0, line: line) },
+            RailItem("Middle\nto draft") { MicButtonGlyph(pressed: 1, line: line) },
+            RailItem("Shake to\ncancel") { MicButtonGlyph(pressed: MicButtonGlyph.shake, line: line) },
+        ], selected: nil)
+        let releasedRail = ActionRail(items: [
+            RailItem("Bottom opens\npanel") { MicButtonGlyph(pressed: 2, line: line) },
+            RailItem("Twice to\nmute") { MicButtonGlyph(pressed: 2, line: line) },
+            RailItem("Hold top\nfor Claude") { MicButtonGlyph(pressed: 0, line: line) },
+            RailItem("Hold middle\nfor K.O. II") { MicButtonGlyph(pressed: 1, line: line) },
+        ], selected: nil)
+        let rails = VStack(alignment: .leading, spacing: 10) {
+            Text("While squeezing").font(.mono(12, .semibold)).foregroundStyle(ink.secondary).padding(.leading, 12)
+            squeezeRail.frame(width: 420)
+            Text("Handle released").font(.mono(12, .semibold)).foregroundStyle(ink.secondary).padding(.leading, 12).padding(.top, 8)
+            releasedRail.frame(width: 420)
+        }
+        .environment(\.onSheet, true).environment(\.colorScheme, s)
+        .padding(28).background(bg).foregroundStyle(ink.primary).font(.ui(14))
+        png(rails, "\(dir)/gestures-\(name).png")
+    }
+    // Gesture demos as frames, for GIFs: the mic acting out each gesture beside what it does on the Mac.
+    for g in [MicGesture.send, .queue, .draft, .cancel] {
+        let fps = 12.0, n = Int(g.demoSeconds * fps)
+        let dirG = "\(dir)/frames-\(g)"
+        try? FileManager.default.createDirectory(atPath: dirG, withIntermediateDirectories: true)
+        for i in 0..<n {
+            let v = MicDemo(chosen: g, ink: Ink.of(.light), live: LiveMic(), island: HUDModel(), at: Double(i) / fps)
+                .frame(width: 340, height: 240).padding(.vertical, 12).background(Color(white: 0.96))
+                .environment(\.colorScheme, .light)
+            png(v, String(format: "%@/%04d.png", dirG, i), scale: 1.5)
+        }
+    }
+    print("docs rendered")
+}
+
+// MARK: hero: a laptop showing Claude and the island, the mic beside it, on a transparent background.
+
+/// The screen: a soft wallpaper, a menu bar, a lo-fi Claude window with the words arriving in its composer, and the
+/// floating island at the top, as it looks while squeezing.
+@MainActor struct HeroScreen: View {
+    let words: String
+    var body: some View {
+        let ink = Ink.of(.light)
+        ZStack(alignment: .top) {
+            LinearGradient(colors: [Color(red: 0.93, green: 0.88, blue: 0.82), Color(red: 0.80, green: 0.86, blue: 0.93)],
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
+            // Menu bar, with Squeeze's mic in it.
+            HStack(spacing: 14) {
+                Spacer()
+                MicButtonGlyph(pressed: MicButtonGlyph.none, line: Color.black.opacity(0.85), side: 15, solid: true)
+                    .frame(width: 15, height: 15)
+                ForEach(0..<3, id: \.self) { _ in Capsule().fill(Color.black.opacity(0.55)).frame(width: 14, height: 6) }
+                Capsule().fill(Color.black.opacity(0.55)).frame(width: 40, height: 6)
+            }
+            .padding(.horizontal, 16).frame(height: 24).background(Color.white.opacity(0.35))
+            // Claude's window.
+            HStack(spacing: 0) {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 6) { ForEach(0..<3, id: \.self) { _ in Circle().fill(Color.black.opacity(0.15)).frame(width: 10, height: 10) } }
+                        .padding(.bottom, 14)
+                    ForEach([0.8, 0.6, 0.7, 0.5, 0.65], id: \.self) { w in
+                        Capsule().fill(Color.black.opacity(0.10)).frame(width: 150 * w, height: 8)
+                    }
+                    Spacer()
+                }
+                .padding(18).frame(width: 190).frame(maxHeight: .infinity, alignment: .top)
+                .background(Color(white: 0.965))
+                VStack(alignment: .leading, spacing: 14) {
+                    Spacer().frame(height: 40)
+                    HStack { Spacer(); Capsule().fill(Color(red: 0.90, green: 0.91, blue: 0.95)).frame(width: 260, height: 34) }
+                    VStack(alignment: .leading, spacing: 9) {
+                        ForEach([0.95, 0.88, 0.92, 0.6], id: \.self) { w in Capsule().fill(Color.black.opacity(0.09)).frame(width: 420 * w, height: 8) }
+                    }
+                    HStack { Spacer(); Capsule().fill(Color(red: 0.90, green: 0.91, blue: 0.95)).frame(width: 190, height: 34) }
+                    Spacer()
+                    // The composer, where the words arrive.
+                    HStack(alignment: .center) {
+                        Text(words).font(.ui(15)).foregroundStyle(ink.primary)
+                            + Text("|").font(.ui(15, .light)).foregroundStyle(Color(red: 0.85, green: 0.47, blue: 0.34))
+                        Spacer()
+                        Circle().fill(Color(red: 0.85, green: 0.47, blue: 0.34)).frame(width: 28, height: 28)
+                            .overlay(Image(systemName: "arrow.up").font(.system(size: 13, weight: .bold)).foregroundStyle(.white))
+                    }
+                    .padding(.leading, 16).padding(.trailing, 10).padding(.vertical, 10)
+                    .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(.white))
+                    .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(Color.black.opacity(0.10)))
+                }
+                .padding(.horizontal, 36).padding(.bottom, 26)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .background(.white)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .shadow(color: .black.opacity(0.18), radius: 24, y: 10)
+            .padding(.top, 70).padding(.horizontal, 70).padding(.bottom, 40)
+            // The island, floating at the top of the screen.
+            heroIsland(words).padding(.top, 34)
+        }
+    }
+}
+
+@MainActor func heroIsland(_ words: String) -> some View {
+    let m = HUDModel(); m.shown = true; m.title = "Listening"; m.tint = .yellow; m.icon = "mic.fill"
+    m.showMeter = true; m.level = -20; m.body = words; m.footer = "Settings redesign"
+    return IslandStack(model: m) { EmptyView() }
+        .environment(\.onSheet, true).environment(\.colorScheme, .light)
+        .foregroundStyle(Ink.of(.light).primary).font(.ui(14))
+        // Over the screen, each piece reads as frosted glass.
+        .environment(\.sheetFill, Color.white.opacity(0.86))
+        .shadow(color: .black.opacity(0.14), radius: 16, y: 8)
+}
+
+@MainActor func heroImage(_ out: String) {
+    let words = "Let's add a dark mode toggle to the settings page"
+    let screenW = 1080.0, screenH = 680.0
+    let laptop = VStack(spacing: 0) {
+        // Lid: a thin dark bezel around the screen.
+        HeroScreen(words: words).frame(width: screenW, height: screenH)
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .padding(16)
+            .background(RoundedRectangle(cornerRadius: 26, style: .continuous).fill(Color(white: 0.11)))
+            .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous).stroke(Color(white: 0.45), lineWidth: 1.5))
+        // Base: aluminium, wider than the lid, with the opening notch.
+        ZStack(alignment: .top) {
+            UnevenRoundedRectangle(cornerRadii: .init(topLeading: 3, bottomLeading: 22, bottomTrailing: 22, topTrailing: 3), style: .continuous)
+                .fill(LinearGradient(colors: [Color(white: 0.86), Color(white: 0.70)], startPoint: .top, endPoint: .bottom))
+                .frame(width: screenW + 32 + 150, height: 24)
+            UnevenRoundedRectangle(cornerRadii: .init(topLeading: 0, bottomLeading: 8, bottomTrailing: 8, topTrailing: 0))
+                .fill(Color(white: 0.62)).frame(width: 150, height: 9)
+        }
+    }
+    let micDemo = MicDemo(chosen: .send, ink: Ink.of(.light), live: LiveMic(), island: HUDModel())
+    let mic = micDemo.mic(t: 0.4, squeeze: 1, press: 0, button: -1, shaking: false, level: 6, sweepY: 519.8)
+        .frame(width: 250, height: 330)
+        .rotationEffect(.degrees(-9))
+        .shadow(color: .black.opacity(0.28), radius: 18, x: 6, y: 14)
+    let scene = ZStack(alignment: .bottomTrailing) {
+        laptop.padding(.trailing, 150).padding(.bottom, 10)
+        mic.offset(x: -10, y: 0)
+    }
+    .padding(40)
+    let r = ImageRenderer(content: scene); r.scale = 2
+    guard let img = r.cgImage else { print("hero failed"); return }
+    try! NSBitmapImageRep(cgImage: img).representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: out))
+    print("hero written")
+}
