@@ -12,7 +12,7 @@ import Foundation
 /// serial queue, so a squeeze's start always completes before its finish.
 final class ClaudeDictation {
     enum Failure: Error, CustomStringConvertible {
-        case notTrusted, claudeNotRunning, noComposer, noButton, notRunning, notSent
+        case notTrusted, claudeNotRunning, noComposer, noButton, notRunning, notSent, switched
         var description: String {
             switch self {
             case .notSent: return "the composer still holds the text"
@@ -21,6 +21,7 @@ final class ClaudeDictation {
             case .noComposer: return "composer not found"
             case .noButton: return "no dictation button next to the composer"
             case .notRunning: return "dictation was not started for this squeeze"
+            case .switched: return "you switched conversations while talking"
             }
         }
     }
@@ -40,6 +41,12 @@ final class ClaudeDictation {
         /// The draft that was in the composer before the squeeze can no longer be found in it (edited, or reformatted
         /// by Claude), so the dictated words can't be told apart from it: never send that, leave it as a draft.
         var draftChanged = false
+        /// The pinned conversation couldn't be shown, so the words went to the one on screen: never send them there.
+        var pinMissed = false
+        /// The conversation's title when dictation started ("" when it has none).
+        var title = ""
+        /// Another conversation was on screen at the release.
+        var switched = false
         /// What the composer held when the squeeze began: a draft, or "".
         let before: String
     }
@@ -92,9 +99,11 @@ final class ClaudeDictation {
         if ClaudeApp.showIfHidden() { Log.write("dictation: Claude was hidden, showed it behind the current app") }
         let axApp = AXUIElementCreateApplication(app.processIdentifier)
         AXUIElementSetAttributeValue(axApp, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+        var pinMissed = false              // `target` is a pinned conversation; nil means the one on screen
         if let target, let found = ComposerDelivery.locateComposer(axApp) {
             do { try ComposerDelivery.switchToSession(titled: target, in: found.window) } catch {
-                Log.write("dictation: could not switch to \(target) (\(error)), using the session on screen")
+                pinMissed = true
+                Log.write("dictation: could not show the pinned conversation (\(error)), dictating on screen as a draft")
             }
         }
         guard let found = ComposerDelivery.locateComposer(axApp) else { return .failure(.noComposer) }
@@ -159,6 +168,8 @@ final class ClaudeDictation {
             if nowLabel != idleLabel { current.labelChanged = true; break }
             if ClaudeApp.isUsingMic() { current.micSeen = true; break }
         }
+        current.pinMissed = pinMissed
+        current.title = ComposerDelivery.activeSessionTitle(in: window) ?? ""
         run = current
         Log.write("dictation: pressed \"\(idleLabel)\"" + (current.labelChanged ? ", now \"\(nowLabel)\""
                   : current.micSeen ? ", Claude has the mic (label not updated: window out of view)" : ", label unchanged after 2 s")
@@ -182,6 +193,10 @@ final class ClaudeDictation {
             run = nil
             var r = current
             let text = end(&r)
+            if r.switched {
+                DispatchQueue.main.async { completion(.failure(.switched)) }
+                return
+            }
             finished = r
             DispatchQueue.main.async { completion(.success(text)) }
         }
@@ -227,6 +242,13 @@ final class ClaudeDictation {
         } else {
             Log.write("dictation: button gone at finish")
         }
+        // Switching conversations ends Claude's dictation, and the composer on screen is now another chat's: read
+        // nothing from it and leave it alone.
+        if switchedAway(r) {
+            Log.write("dictation: the conversation on screen changed during the squeeze, nothing sent or touched")
+            r.switched = true
+            return ""
+        }
         // Done when the button is back to its idle label and the text has stopped changing. If the label never
         // changed (nothing to watch), the text has to hold still longer.
         var last = ""
@@ -251,7 +273,7 @@ final class ClaudeDictation {
     // MARK: complete
 
     enum Action { case keep, send, queue, discard }
-    enum Outcome { case kept, keptDraftChanged, sent, queued, discarded }
+    enum Outcome { case kept, keptDraftChanged, keptPinMissed, keptSwitched, sent, queued, discarded }
 
     /// What happens to the text Claude left in the composer: kept as a draft, sent with the Send button (queued when
     /// the session is busy and shows Stop instead), queued in Claude with Cmd+Return, or removed. A failed send or
@@ -270,6 +292,13 @@ final class ClaudeDictation {
             case .discard:
                 restore(&r)
                 result = .success(.discarded)
+            case .send where r.pinMissed, .queue where r.pinMissed:
+                result = .success(.keptPinMissed)
+            // Another conversation is on screen than the one dictated into: pressing Send now would hit the wrong one.
+            case .send where (ComposerDelivery.activeSessionTitle(in: r.window) ?? "") != r.title,
+                 .queue where (ComposerDelivery.activeSessionTitle(in: r.window) ?? "") != r.title:
+                Log.write("dictation: the conversation on screen changed during the squeeze, not sent")
+                result = .success(.keptSwitched)
             case .send where r.draftChanged, .queue where r.draftChanged:
                 Log.write("dictation: the earlier draft changed during the squeeze, left everything as a draft")
                 result = .success(.keptDraftChanged)
@@ -326,7 +355,10 @@ final class ClaudeDictation {
     }
 
     /// Leaves the composer holding what it held before the squeeze.
+    private func switchedAway(_ r: Run) -> Bool { (ComposerDelivery.activeSessionTitle(in: r.window) ?? "") != r.title }
+
     private func restore(_ r: inout Run) {
+        if switchedAway(r) { return }          // never write one chat's draft into another
         let composer = r.composer
         AXUIElementSetAttributeValue(composer, kAXValueAttribute as CFString, r.before as CFString)
         Thread.sleep(forTimeInterval: 0.15)
@@ -373,6 +405,11 @@ final class ClaudeDictation {
             AXUIElementSetAttributeValue(axApp, "AXManualAccessibility" as CFString, kCFBooleanTrue)
             guard let found = ComposerDelivery.locateComposer(axApp) else { Log.write("axdump: composer not found"); return }
             logButtons(window: found.window, composer: found.composer, why: "requested")
+            // Read-only: which conversations a pin could reach (a pin works only through a sidebar row).
+            let rows = SessionStore.recent(limit: 8).map { s in
+                "\(ComposerDelivery.sidebarRows(titled: s.title, in: found.window).count) row(s): \(s.title)"
+            }
+            Log.write("axdump: on screen \(ComposerDelivery.activeSessionTitle(in: found.window) ?? "(no title)")\n  " + rows.joined(separator: "\n  "))
         }
     }
 

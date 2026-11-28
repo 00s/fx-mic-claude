@@ -533,10 +533,12 @@ final class AppController {
     }
 
     private var hudShownForSerial = -1
-    /// Where Apple-mode text will go: the session picked in the menu, else the last used one, else the inbox target.
+    /// Where Apple-mode text will go: the pinned conversation, else the one on screen, else the inbox target.
     private var expectedTarget: String? {
         if settings.composerDelivery, ComposerDelivery.isTrusted,
-           let title = settings.targetSessionTitle ?? SessionStore.lastUsed()?.title { return title }
+           ClaudeApp.running != nil {
+            return settings.targetSessionTitle ?? ComposerDelivery.onScreenTitle() ?? "Conversation on screen"
+        }
         return dispatcher.currentTarget?.title ?? "No session armed: will copy to the clipboard"
     }
 
@@ -778,7 +780,7 @@ final class AppController {
     private func startClaudeDictation() {
         claudeSqueeze = true
         let serial = utteranceSerial
-        let target = settings.targetSessionTitle ?? SessionStore.lastUsed()?.title
+        let target = settings.targetSessionTitle              // only a pin switches conversations
         DispatchQueue.main.async { self.hud.starting() }
         dictation.start(serial: serial, target: target) { [weak self] result in
             guard let self else { return }
@@ -786,11 +788,17 @@ final class AppController {
             case .success(let session):
                 self.claudeLive = true
                 if !session.isEmpty { self.dictatedSession[serial] = session }
-                self.hud.listeningReady(session: session)
+                self.hud.listeningReady(session: session.isEmpty ? "Conversation on screen" : session)
             case .failure(let error):
-                Log.write("dictation: could not start (\(error)), Apple's recognizer takes this message")
                 self.claudeLive = false
-                self.hud.listeningReady(session: self.expectedTarget)
+                if self.settings.appleFallback {
+                    Log.write("dictation: could not start (\(error)), Apple's recognizer takes this message")
+                    self.hud.listeningReady(session: self.expectedTarget)
+                } else if error != .notRunning {                // nothing is recording this squeeze: say so
+                    Log.write("dictation: could not start (\(error))")
+                    self.hud.flash("Not listening", detail: "Claude has no text box with a mic on screen (\(error)).",
+                                   tint: .red, icon: "mic.slash", seconds: 4)
+                }
             }
         }
     }
@@ -805,6 +813,8 @@ final class AppController {
     private func pick(apple: UtteranceResult, claude: Result<String, ClaudeDictation.Failure>?, serial: Int) -> UtteranceResult {
         DispatchQueue.main.async { self.claudeLive = false }
         guard let claude else { return apple }
+        // Not even Apple's text: it would go to whichever conversation is on screen now.
+        if case .failure(.switched) = claude { return UtteranceResult(text: "", locale: "switched", confidence: 0, alternatives: []) }
         let appleLine = String(format: "apple [%@ %.2f]: %@", apple.locale, apple.confidence, Log.text(apple.text))
         switch claude {
         case .success(let text) where !text.isEmpty:
@@ -825,6 +835,15 @@ final class AppController {
         // Text dictated in Claude goes back to the session it was spoken into.
         let dictatedIn = dictatedSession.removeValue(forKey: serial)
         let inComposer = result.locale == "claude"      // Claude's dictation left this text in the composer
+        if result.locale == "switched" {
+            canceledSerials.remove(serial)
+            intents.removeValue(forKey: serial)
+            if activeSqueeze == nil {
+                hud.flash("Not sent", detail: "You switched conversations while talking.", tint: .orange,
+                          icon: "arrow.left.arrow.right", seconds: 3)
+            }
+            return
+        }
         if canceledSerials.remove(serial) != nil {
             Log.write("canceled: \(Log.text(result.text))")
             if inComposer { dictation.complete(serial: serial, action: .discard) { _ in } }
@@ -848,30 +867,32 @@ final class AppController {
         }
         let outcome: String
         var hudTitle = "Sent"
-        if settings.composerDelivery, ComposerDelivery.isTrusted, intent != .send,
-           let target = dictatedIn ?? settings.targetSessionTitle ?? SessionStore.lastUsed()?.title {
+        // The pinned conversation, else whatever is on screen (nil title: a Project or a new chat).
+        let pin = settings.targetSessionTitle
+        let target = pin ?? ComposerDelivery.onScreenTitle()
+        // Queueing needs a title to watch for the turn's end; without one the words are left as a draft.
+        if settings.composerDelivery, ComposerDelivery.isTrusted, intent == .draft || (intent == .queue && target != nil) {
             if intent == .draft {
                 do {
-                    try ComposerDelivery.send(text, toSessionTitled: target, pressSend: false)
-                    outcome = "Draft in \(target)"
+                    try ComposerDelivery.send(text, toSessionTitled: pin, pressSend: false)
+                    outcome = "Draft in \(target ?? "the conversation on screen")"
                 } catch {
                     copiedToClipboard(text, why: "The draft couldn't be added in Claude")
                     outcome = "Draft failed (\(error)), copied"
                 }
                 hudTitle = "Draft"
-            } else {
+            } else if let target {
                 queued.append((text, target, Date()))
                 outcome = "Queued for \(target)"
                 hudTitle = "Queued"
                 startQueue()
+            } else {
+                outcome = inboxOutcome(text: text, result: result, speechSeconds: speechSeconds)
             }
-            if settings.targetSessionTitle != nil { settings.targetSessionTitle = nil }
         } else if settings.composerDelivery, ComposerDelivery.isTrusted {
             do {
-                let target = dictatedIn ?? settings.targetSessionTitle ?? SessionStore.lastUsed()?.title
-                try ComposerDelivery.send(text, toSessionTitled: target)
-                outcome = target.map { "Sent to \($0)" } ?? "Sent to Claude"
-                if settings.targetSessionTitle != nil { settings.targetSessionTitle = nil }   // it is the last used now
+                try ComposerDelivery.send(text, toSessionTitled: pin, pressSend: intent == .send)
+                outcome = intent == .send ? target.map { "Sent to \($0)" } ?? "Sent to Claude" : "Draft in the conversation on screen"
                 if let target {
                     activity.watch(sessionTitle: target, onThinking: { [weak self] in
                         Log.write("activity: \(target) is thinking")
@@ -902,7 +923,7 @@ final class AppController {
     /// queueing fails, the composer is put back as it was and the text goes to FXMic's own queue or the inbox.
     private func deliverInComposer(_ text: String, intent: Intent, session: String?, serial: Int, speechSeconds: Double) {
         let action: ClaudeDictation.Action = intent == .draft ? .keep : intent == .queue ? .queue : .send
-        let target = session ?? settings.targetSessionTitle ?? SessionStore.lastUsed()?.title
+        let target = session                 // where it was dictated; nil when that conversation has no readable title
         dictation.complete(serial: serial, action: action) { [weak self] result in
             guard let self else { return }
             let name = target ?? "Claude"
@@ -913,6 +934,10 @@ final class AppController {
                 outcome = "Draft in \(name)"; title = "Draft"
             case .success(.keptDraftChanged):
                 outcome = "Left as a draft in \(name): the earlier draft changed, so it wasn't sent"; title = "Left as draft"
+            case .success(.keptPinMissed):
+                outcome = "Pinned chat not found: left as a draft in \(name)"; title = "Left as draft"
+            case .success(.keptSwitched):
+                outcome = "Not sent: you switched conversations while talking"; title = "Not sent"
             case .success(.sent):
                 outcome = "Sent to \(name)"
                 if let target { self.watchActivity(target) }
@@ -930,7 +955,6 @@ final class AppController {
                     outcome = self.inboxOutcome(text: text, result: UtteranceResult(text: text, locale: "claude", confidence: 1, alternatives: []), speechSeconds: speechSeconds)
                 }
             }
-            if self.settings.targetSessionTitle != nil { self.settings.targetSessionTitle = nil }
             Log.write(String(format: "%@: %@  [claude, %.1fs]", outcome, Log.text(text), speechSeconds))
             self.recent.insert((Date(), text, outcome), at: 0)
             if self.recent.count > 12 { self.recent.removeLast() }

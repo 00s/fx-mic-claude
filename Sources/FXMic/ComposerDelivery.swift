@@ -44,15 +44,36 @@ enum ComposerDelivery {
             .first.map { String(string($0, kAXDescriptionAttribute).dropLast(suffix.count)) }
     }
 
+    /// Title of the conversation on screen right now, or nil when it has none FXMic can read (a Project, a new chat).
+    static func onScreenTitle() -> String? {
+        guard isTrusted, let app = ClaudeApp.running else { return nil }
+        let axApp = AXUIElementCreateApplication(app.processIdentifier)
+        guard let found = locateComposer(axApp, attempts: 1) else { return nil }
+        return activeSessionTitle(in: found.window)
+    }
+
+    /// The sidebar rows that would show the session with this title, exact matches first. Rows are links labelled with
+    /// the title, plus a state while one applies ("… Running Open · 5 pull requests"); older Claude builds used
+    /// buttons titled "Idle <title>" or "Running <title>".
+    static func sidebarRows(titled target: String, in window: AXUIElement) -> [AXUIElement] {
+        let states = ["Running", "Idle", "Open", "Forked from", "Ready", "Needs", "Merged", "Closed", "Draft", "Unread"]
+        var exact: [AXUIElement] = [], withState: [AXUIElement] = []
+        for el in find(window, depth: 0, { ["AXLink", "AXButton"].contains(role($0)) }) {
+            let link = role(el) == "AXLink"
+            let t = link && string(el, kAXTitleAttribute).isEmpty ? string(el, kAXDescriptionAttribute) : string(el, kAXTitleAttribute)
+            if link {
+                if t == target { exact.append(el) } else if states.contains(where: { t.hasPrefix("\(target) \($0)") }) { withState.append(el) }
+            } else if t.hasSuffix(target), t.hasPrefix("Idle ") || t.hasPrefix("Running ") || t == target || t.hasPrefix("#") {
+                exact.append(el)
+            }
+        }
+        return exact + withState
+    }
+
     /// Presses the sidebar row with this title so the window shows that session. No focus change.
     static func switchToSession(titled target: String, in window: AXUIElement) throws {
         if activeSessionTitle(in: window) == target { return }
-        let rows = find(window, depth: 0) { el in
-            guard role(el) == "AXButton" else { return false }
-            let t = string(el, kAXTitleAttribute)
-            return t.hasSuffix(target) && (t.hasPrefix("Idle ") || t.hasPrefix("Running ") || t == target || t.hasPrefix("#"))
-        }
-        guard let row = rows.first else { throw Failure.sessionNotFound }
+        guard let row = sidebarRows(titled: target, in: window).first else { throw Failure.sessionNotFound }
         guard AXUIElementPerformAction(row, kAXPressAction as CFString) == .success else { throw Failure.switchFailed }
         for _ in 0..<20 {                 // up to 2 s for the view to change
             Thread.sleep(forTimeInterval: 0.1)
@@ -128,15 +149,17 @@ enum ComposerDelivery {
         if string(composer, kAXValueAttribute).hasPrefix(text.prefix(40)) { throw Failure.notSent }
     }
 
-    /// The main window and its composer. The tree can take ~2 s to appear the first time.
-    static func locateComposer(_ axApp: AXUIElement) -> (window: AXUIElement, composer: AXUIElement)? {
-        for attempt in 0..<12 {
+    /// The main window and its composer: the focused one when there are several (a side chat is open), else the
+    /// first. The tree can take ~2 s to appear the first time.
+    static func locateComposer(_ axApp: AXUIElement, attempts: Int = 12) -> (window: AXUIElement, composer: AXUIElement)? {
+        for attempt in 0..<attempts {
             let windows = (attribute(axApp, kAXWindowsAttribute) as? [AXUIElement]) ?? []
             if let main = (attribute(axApp, kAXMainWindowAttribute) as! AXUIElement?) ?? windows.first,
-               let composer = find(main, depth: 0, { role($0) == "AXTextArea" && string($0, kAXDescriptionAttribute) == "Prompt" }).first {
+               case let composers = find(main, depth: 0, { role($0) == "AXTextArea" && string($0, kAXDescriptionAttribute) == "Prompt" }),
+               let composer = composers.first(where: { (attribute($0, kAXFocusedAttribute) as? Bool) == true }) ?? composers.first {
                 return (main, composer)
             }
-            if attempt < 11 { Thread.sleep(forTimeInterval: 0.25) }
+            if attempt < attempts - 1 { Thread.sleep(forTimeInterval: 0.25) }
         }
         return nil
     }

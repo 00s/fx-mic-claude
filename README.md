@@ -103,10 +103,11 @@ open ~/Applications/FXMic.app
 
 On first launch grant Microphone when asked, then use the menu's "Grant Accessibility access…" (System Settings >
 Privacy & Security > Accessibility) so messages can go into Claude's composer. Right-click the handset for the menu:
-Start/Stop listening, Input device, Target, Shake to cancel, Menu bar activity badge, Launch at login, Quit. "Target" shows, by name, the session that
-will receive the next message: by default the one you used last. The submenu lists your five most recently used
-sessions; pick another and the next message goes there even while a different session is on screen (the app switches
-the sidebar row before typing, no focus change), and that session then counts as the last used. Under "Input device" pick "External Microphone"
+Start/Stop listening, Input device, Target, Shake to cancel, Menu bar activity badge, Launch at login, Quit. **Where a message goes:** to the conversation on screen in Claude when you squeeze,
+including while Claude is behind other apps. "Target" in the menu can instead **pin** one of your five most recent
+conversations: every squeeze then switches Claude to it first, until you pick "Conversation on screen" again. A pin
+works only while that conversation has a row in Claude's sidebar; if it can't be shown, the words stay as a draft in
+the conversation on screen. Switching conversations while talking also leaves the words unsent. Under "Input device" pick "External Microphone"
 for the headphone-jack adapter or "USB Advanced Audio Device" for the Sabrent; picking one starts listening on it.
 Left-click the handset to hang up or pick up.
 

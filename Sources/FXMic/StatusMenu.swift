@@ -141,15 +141,25 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
         // 3. target session, shown by (truncated) name
         let targetMenu = NSMenu()
+        // By default messages go to the conversation on screen. Picking one here pins it until unpicked.
         let recent = SessionStore.recent(limit: 5)
-        let effective = Settings.shared.targetSessionTitle ?? recent.first?.title
+        let pin = Settings.shared.targetSessionTitle
+        let onScreen = NSMenuItem(title: "Conversation on screen", action: #selector(selectTarget(_:)), keyEquivalent: "")
+        onScreen.target = self; onScreen.representedObject = ""
+        onScreen.state = pin == nil ? .on : .off
+        targetMenu.addItem(onScreen)
+        targetMenu.addItem(.separator())
+        let header = NSMenuItem(title: "Pin to:", action: nil, keyEquivalent: "")
+        header.isEnabled = false
+        targetMenu.addItem(header)
         for session in recent {
             let item = NSMenuItem(title: session.title, action: #selector(selectTarget(_:)), keyEquivalent: "")
             item.target = self; item.representedObject = session.title
-            item.state = session.title == effective ? .on : .off
+            item.state = session.title == pin ? .on : .off
             targetMenu.addItem(item)
         }
-        let shown = effective.map { $0.count > 24 ? String($0.prefix(24)).trimmingCharacters(in: .whitespaces) + "…" : $0 } ?? "current session"
+        let shown = pin.map { "pinned to " + ($0.count > 22 ? String($0.prefix(22)).trimmingCharacters(in: .whitespaces) + "…" : $0) }
+            ?? "conversation on screen"
         let targetItem = NSMenuItem(title: "Target: \(shown)", action: nil, keyEquivalent: "")
         targetItem.submenu = targetMenu
         menu.addItem(targetItem)
@@ -216,7 +226,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     @objc private func selectTarget(_ sender: NSMenuItem) {
         let title = sender.representedObject as? String ?? ""
         Settings.shared.targetSessionTitle = title.isEmpty ? nil : title
-        Log.write("target: \(title.isEmpty ? "last used" : title)")
+        Log.write("target: \(title.isEmpty ? "conversation on screen" : "pinned: " + title)")
         controller.snapshot()
     }
     @objc private func toggleEngine() {
