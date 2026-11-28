@@ -288,6 +288,7 @@ struct DemoScene: View {
             }
         } symbols: {
             MicButtonGlyph(pressed: MicButtonGlyph.none, line: ink.primary, side: 18, solid: true).tag("app")
+            KO2Glyph().frame(width: 54, height: 74).tag("ko2")
         }
         .accessibilityHidden(true)
     }
@@ -392,12 +393,23 @@ struct DemoScene: View {
         var drop = g
         drop.opacity = p
         drop.translateBy(x: 0, y: -16 * (1 - p))
-        drop.fill(rect(64, 26, 108, 140, 16), with: .color(window))
-        drop.stroke(rect(64, 26, 108, 140, 16), with: .color(edge), lineWidth: 1)
-        drop.fill(rect(71, 33, 94, 18, 9), with: .color(bar))
-        for i in 0..<3 { drop.fill(rect(71 + Double(i) * 32, 56, 30, 14, 7), with: .color(i == 1 ? mine : bar)) }
-        drop.stroke(rect(71, 76, 94, 82, 11), with: .color(edge), lineWidth: 1)
-        for i in 0..<3 { drop.fill(rect(79, 86 + Double(i) * 22, i == 1 ? 60 : 72, 9, 4.5), with: .color(bar)) }
+        // The panel as it is: the mic and "Squeeze to talk", the "Send to" line, then Chats, Gestures and Settings.
+        drop.fill(rect(52, 26, 120, 104, 20), with: .color(window))
+        drop.stroke(rect(52, 26, 120, 104, 20), with: .color(edge), lineWidth: 1)
+        let fill = ink.secondary.opacity(scheme == .dark ? 0.22 : 0.12)
+        drop.fill(rect(59, 33, 106, 26, 13), with: .color(fill))
+        if let icon = drop.resolveSymbol(id: "app") { drop.draw(icon, in: CGRect(x: 64, y: 37, width: 18, height: 18)) }
+        drop.fill(rect(88, 42, 54, 8, 4), with: .color(ink.primary.opacity(0.75)))
+        drop.fill(rect(59, 64, 106, 22, 11), with: .color(fill))
+        drop.fill(rect(66, 72, 16, 6, 3), with: .color(ink.secondary.opacity(0.6)))
+        drop.fill(rect(85, 72, 58, 6, 3), with: .color(ink.primary.opacity(0.7)))
+        symbol(&drop, "chevron.up.chevron.down", 150, 75, 6, ink.secondary)
+        for i in 0..<3 {
+            let x = 59 + Double(i) * 36.3
+            drop.fill(rect(x, 91, 33.4, 22, 11), with: .color(fill))
+            drop.fill(dot(x + 9, 102, 2.6), with: .color(ink.primary.opacity(0.7)))
+            drop.fill(rect(x + 14, 99.5, 13, 5, 2.5), with: .color(ink.primary.opacity(0.7)))
+        }
     }
 
     /// Claude's window coming forward over another one.
@@ -490,18 +502,8 @@ struct DemoScene: View {
                 tile.draw(image, in: CGRect(x: cx - 20, y: cy - 20, width: 40, height: 40))
             }
         } else {
-            // A lo-fi sampler: a slab with a small screen, two knobs and a grid of pads.
-            let body = rect(cx - 30, cy - 38, 60, 76, 5)
-            tile.fill(body, with: .color(scheme == .dark ? Color(white: 0.55) : Color(white: 0.86)))
-            tile.stroke(body, with: .color(edge), lineWidth: 1)
-            tile.fill(rect(cx - 24, cy - 32, 24, 12, 2), with: .color(Color(white: 0.2)))
-            for x in [cx + 10, cx + 21] { tile.fill(dot(x, cy - 26, 4), with: .color(Color(white: 0.35))) }
-            for row in 0..<4 {
-                for col in 0..<3 {
-                    let pad = rect(cx - 22 + Double(col) * 16, cy - 12 + Double(row) * 12.5, 12, 9.5, 2)
-                    tile.fill(pad, with: .color(row == 3 && col == 2 ? orange : Color(white: scheme == .dark ? 0.8 : 0.97)))
-                }
-            }
+            // The K.O. II itself, drawn from TE's top view like the mic beside it.
+            if let ko2 = tile.resolveSymbol(id: "ko2") { tile.draw(ko2, in: CGRect(x: cx - 27, y: cy - 37, width: 54, height: 74)) }
         }
         if saved {
             let p = index == 1 ? Self.ease(u / 0.3) : 1
@@ -509,5 +511,61 @@ struct DemoScene: View {
             symbol(&g, index == 1 ? "checkmark" : "arrow.clockwise", cx + 30, cy - 30, 10 * p, .white)
         }
         caption(&g, gesture == .claude ? "Claude mode" : "K.O. II mode", cx, 150, 13, saved ? ink.primary : ink.secondary)
+    }
+}
+
+/// The K.O. II (EP-133) from above, in its colors, drawn like the mic beside it: the keys where TE's top-view drawing
+/// puts them (units of that drawing, 288.5 x 393.5, as in the K.O. II companion's model): lid and speaker, the screen
+/// band, three knobs, SOUND / MAIN / TEMPO, the left column with the fader slot, the group keys, the 12 pads, and
+/// SAMPLE to PLAY on the right.
+struct KO2Glyph: View {
+    var body: some View {
+        Canvas { g, size in
+            let k = min(size.width / 288.5, size.height / 393.5)
+            g.translateBy(x: (size.width - 288.5 * k) / 2, y: (size.height - 393.5 * k) / 2)
+            g.scaleBy(x: k, y: k)
+            g.translateBy(x: -75.7, y: -61.0)
+            func hex(_ h: UInt32) -> Color {
+                Color(.sRGB, red: Double(h >> 16 & 255) / 255, green: Double(h >> 8 & 255) / 255, blue: Double(h & 255) / 255, opacity: 1)
+            }
+            func box(_ x: Double, _ y: Double, _ w: Double, _ h: Double, _ r: Double) -> Path {
+                Path(roundedRect: CGRect(x: x, y: y, width: w, height: h), cornerRadius: r, style: .continuous)
+            }
+            let hair = 1.0 / k
+            func paint(_ path: Path, _ fill: UInt32, _ edge: UInt32) {
+                g.fill(path, with: .color(hex(fill)))
+                g.stroke(path, with: .color(hex(edge)), lineWidth: hair)
+            }
+            // The case, the lid over the batteries and the speaker beside it, the screen band across.
+            paint(box(75.7, 61.0, 288.5, 393.5, 6), 0xECECE9, 0xC8C8C5)
+            paint(box(75.7, 74.1, 196.6, 78.7, 3), 0xF4F4F2, 0xCFCFCC)
+            for row in 0..<4 {
+                for col in 0..<5 { g.fill(Path(ellipseIn: CGRect(x: 284 + Double(col) * 15.5, y: 86 + Double(row) * 16.5, width: 6.5, height: 6.5)), with: .color(hex(0x858A90))) }
+            }
+            paint(box(75.7, 152.8, 288.5, 78.5, 2), 0x231F20, 0x231F20)
+            let col = [88.9, 128.1, 167.5, 206.8, 246.2, 285.5, 324.8], row = [244.5, 284.0, 323.3, 362.6, 402.0]
+            let K = 26.3, half = 13.1
+            let colors: [String: (UInt32, UInt32)] = ["bk": (0x231F20, 0x3A3536), "or": (0xF15A22, 0xD24A15),
+                                                      "wh": (0xE4E3DF, 0xB9B8B4), "gr": (0x989FA5, 0x7D848A), "sl": (0x818E95, 0x6A767D)]
+            func key(_ x: Double, _ y: Double, _ w: Double, _ h: Double, _ c: String) {
+                let (f, e) = colors[c]!
+                paint(box(x, y, w, h, 3.5), f, e)
+            }
+            // Knobs: X on the left, then the two on the right.
+            for x in [col[0], col[5], col[6]] {
+                paint(Path(ellipseIn: CGRect(x: x, y: row[0], width: 26.6, height: 26.6)), 0x989FA5, 0x7D848A)
+                g.fill(Path(ellipseIn: CGRect(x: x + 7.3, y: row[0] + 7.3, width: 12, height: 12)), with: .color(hex(0xC9CED2)))
+            }
+            for i in 1...3 { key(col[i], row[0], K, half, "bk") }                             // SOUND, MAIN, TEMPO
+            key(89.7, 284.8, 24.6, 11.5, "bk"); key(89.7, 311.0, 24.6, 11.5, "bk"); key(89.7, 415.8, 24.6, 11.5, "gr")
+            g.fill(box(100.6, 336.6, 2.8, 62, 1.4), with: .color(hex(0x6E7276)))             // the fader slot and its cap
+            paint(Path(ellipseIn: CGRect(x: 102 - 9, y: 367.6 - 9, width: 18, height: 18)), 0x989FA5, 0x7D848A)
+            for r in 1...4 { key(col[1], row[r], K, K, "gr") }                               // groups A to D
+            for r in 1...4 { for c in 2...4 { key(col[c], row[r], K, K, "bk") } }            // the 12 pads
+            key(col[5], row[1], K, half, "or"); key(col[6], row[1], K, half, "bk")            // SAMPLE, TIMING
+            key(col[5], row[2], K, half, "bk"); key(col[6], row[2], K, half, "wh")            // FX, ERASE
+            key(col[5], row[3], K, K, "wh"); key(col[6], row[3], K, K, "wh")                  // − and +
+            key(col[5], row[4], K, K, "or"); key(col[6], row[4], K, K, "sl")                  // RECORD, PLAY
+        }
     }
 }
