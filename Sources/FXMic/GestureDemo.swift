@@ -113,7 +113,7 @@ struct MicDemo: View {
             // After the 3 s hold the sample LEDs confirm: sweeping down for K.O. II, up for Claude.
             let sweeping = !isLive && step.sweep
             let beat = Int(u / 0.11) % 4
-            let sweepY = sweeping ? 425.0 + Double(gesture == .ko2 ? beat : 3 - beat) * 46 : 517
+            let sweepY = sweeping ? 411.0 + Double(gesture == .ko2 ? beat : 3 - beat) * 54.4 : 519.8
             let loudness = Double(max(0, min(1, (island.level + 60) / 54)))
             let level = !speaking ? 0 : isLive ? loudness * 10 : 1.5 + abs(sin(t * 7)) * 4 + abs(sin(t * 17)) * 1.5
             let caption = isLive ? gesture.label
@@ -187,12 +187,14 @@ struct MicDemo: View {
                 }
             }
             // Handle, swinging in toward the body when squeezed.
-            let pull = squeeze * 44
             var handle = Path()
-            handle.move(to: CGPoint(x: 244 + pull, y: 212 - squeeze * 8))
+            handle.move(to: CGPoint(x: 205 + squeeze * 83, y: 212 - squeeze * 8))
             handle.addLine(to: CGPoint(x: 326, y: 183))
-            handle.addLine(to: CGPoint(x: 326, y: 712))
-            handle.addLine(to: CGPoint(x: 303 + pull * 0.4, y: 710))
+            // One orange piece: the lever, and below it a strip down the case's side.
+            handle.addLine(to: CGPoint(x: 326, y: 892))
+            handle.addLine(to: CGPoint(x: 305, y: 892))
+            // It pivots at the bottom: squeezing swings only the tip in, so the outer edge stays one line.
+            handle.addLine(to: CGPoint(x: 305, y: 710))
             handle.closeSubpath()
             paint(handle, hex(0xEB6133))
             // Cable
@@ -200,10 +202,13 @@ struct MicDemo: View {
             for i in 0..<5 { paint(rect(600, 1161 + Double(i) * 32, 71, 20, 10), hex(0x9E9E9E)) }
             // Side buttons, pushed in when pressed
             let buttons: [(Double, Double, UInt32, UInt32)] =
-                [(1056, 161, 0xE9805A, 0xB4603F), (1067, 417, 0xF6F6F4, 0xBDBDBB), (1067, 857, 0xDADAD7, 0xB0B0AE)]
+                [(1067, 161, 0xE9805A, 0xB4603F), (1067, 417, 0xF6F6F4, 0xBDBDBB), (1067, 857, 0xDADAD7, 0xB0B0AE)]
+            // Only the bumps outside the case show: a pressed button goes into it, not through it.
+            let unclipped = g
+            g.clip(to: Path(CGRect(x: 1067, y: 0, width: 400, height: 1500)))
             for (i, b) in buttons.enumerated() {
                 let inset = i == button ? press * 24 : 0
-                let w = i == 0 ? 34.0 : 48.0
+                let w = 48.0
                 let shape = rect(b.0 - inset, b.1, w, i == 0 ? 111 : 112, 18)
                 paint(shape, hex(b.2), edge: hex(b.3))
                 if i == button && press > 0 {
@@ -211,13 +216,14 @@ struct MicDemo: View {
                              with: .color((outline ? lineColor : hex(0xEB6133)).opacity(press)), lineWidth: outline ? hair * 2 : 10)
                 }
             }
+            g = unclipped
             // Body and speaker panel
             paint(rect(323, 73, 744, 1071, 22), hex(0xF2F2F0), edge: hex(0xCCCCCA))
             paint(Path(roundedRect: CGRect(x: 323, y: 73, width: 744, height: 583),
                        cornerRadii: .init(topLeading: 22, bottomLeading: 18, bottomTrailing: 18, topTrailing: 22)),
                   hex(0x787878))
             // Speaker dots: they darken from the top with the voice, like the reference's level.
-            for row in 0..<10 {
+            for row in 0..<9 {
                 let lit = Double(row) < level
                 let fill: Color = Double(row) < level.rounded(.down) ? hex(0x404040) : lit ? hex(0x757572) : hex(0xCDC9BC)
                 for col in 0..<11 {
@@ -229,17 +235,17 @@ struct MicDemo: View {
                     }
                 }
             }
-            // The two LED strips
-            for (top, lit, color) in [(137.0, 215.0, hex(0xEE4230)), (393.0, sweepY, Color.white)] {
-                paint(rect(971, top, 48, 215, 24), hex(0x5C5C5C))
+            // The two LED strips, on the grille's grid: the column after the holes, rows 1-4 and 6-9.
+            for (first, lit, color) in [(139.0, 193.4, hex(0xEE4230)), (411.0, sweepY, Color.white)] {
+                paint(rect(969.8, first - 24, 48, 3 * 54.4 + 48, 24), hex(0x5C5C5C))
                 for i in 0..<4 {
-                    let y = top + 32 + Double(i) * 46
+                    let y = first + Double(i) * 54.4
                     let on = abs(y - lit) < 8
                     if outline {
-                        if on { g.fill(dot(995, y, 12), with: .color(lineColor)) } else { g.stroke(dot(995, y, 12), with: .color(lineColor), lineWidth: hair) }
+                        if on { g.fill(dot(993.8, y, 12), with: .color(lineColor)) } else { g.stroke(dot(993.8, y, 12), with: .color(lineColor), lineWidth: hair) }
                     } else {
-                        if on { g.fill(dot(995, y, 27), with: .color(color.opacity(0.28))) }
-                        g.fill(dot(995, y, 12), with: .color(on ? color : hex(0x8A8A8A)))
+                        if on { g.fill(dot(993.8, y, 27), with: .color(color.opacity(0.28))) }
+                        g.fill(dot(993.8, y, 12), with: .color(on ? color : hex(0x8A8A8A)))
                     }
                 }
             }
