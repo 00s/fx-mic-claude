@@ -66,7 +66,8 @@ Tell the user what you are doing at each step; steps marked HUMAN need their han
 - The app runs as a menu bar item. Rebuild and relaunch with `tools/make_app.sh && pkill -x FXMic; open ~/Applications/FXMic.app`.
   Logs: `~/.fxmic/fxmic.log`; state: `~/.fxmic/state.json`.
 - Composer delivery works through the Accessibility API: it sets the composer text and presses the button labeled
-  "Send", never one labeled "Stop". Session targeting presses the sidebar row titled "Idle <title>" or
+  "Send", never the session's "Stop" button. The one Stop-labeled control FXMic presses is Claude's dictation
+  control ("Stop dictation"), and only while it is listening, in the Claude-dictation mode. Session targeting presses the sidebar row titled "Idle <title>" or
   "Running <title>"; the active session is the header button described "<title>, rename session".
 
 ## Layout

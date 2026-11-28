@@ -40,10 +40,13 @@ enum ClaudeApp {
     /// Claude hidden with ⌘H exposes no usable accessibility tree: no composer text, no Send, no label changes. Show
     /// its windows again without activating it (the current app stays in front) and give them a moment to come back.
     /// True when it had to.
+    /// `wait`: give the windows time to come back (off the main thread only; on it, callers that retry anyway, such
+    /// as ComposerDelivery.locateComposer, pass false so the UI never stalls).
     @discardableResult
-    static func showIfHidden() -> Bool {
+    static func showIfHidden(wait: Bool = true) -> Bool {
         guard let app = running, app.isHidden else { return false }
         app.unhide()
+        guard wait, !Thread.isMainThread else { return true }
         for _ in 0..<10 where app.isHidden { Thread.sleep(forTimeInterval: 0.05) }
         Thread.sleep(forTimeInterval: 0.3)
         return true
@@ -65,6 +68,11 @@ enum ClaudeApp {
         if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
             bringForward(url)
         }
+    }
+
+    /// Brings Claude to the front and leaves it there.
+    static func show() {
+        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) { bringForward(url) }
     }
 
     private static func bringForward(_ url: URL) {

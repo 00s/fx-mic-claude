@@ -30,10 +30,8 @@ enum SessionStore {
         return best?.running
     }
 
-    /// The session used most recently (last focused in the desktop app).
-    static func lastUsed() -> ClaudeSession? { recent(limit: 1).first }
-
-    /// Most recently focused sessions first, archived ones and side chats excluded.
+    /// For the menu's pin list: most recently focused first, one per title (a scheduled task makes a new session with
+    /// the same title every run, and a pin can only name a title), archived sessions and side chats excluded.
     static func recent(limit: Int = 5) -> [ClaudeSession] {
         guard let files = FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.contentModificationDateKey]) else { return [] }
         let iso = ISO8601DateFormatter()
@@ -49,7 +47,9 @@ enum SessionStore {
                   // Side chats ("btw", opened from a session) carry btwLoweredFrom. They have no sidebar row, so as
                   // a target they failed with "not in the sidebar" and cost every squeeze a failed switch (#12).
                   // Undocumented app internals, like the rest of this file.
-                  !(obj["btwLoweredFrom"] is String) else { continue }
+                  !(obj["btwLoweredFrom"] is String),
+                  // Some side chats lack that field: a fork titled "btw: …".
+                  !(title.hasPrefix("btw:") && obj["forkedFromSessionId"] is String) else { continue }
             // Timestamps are epoch milliseconds in current builds; accept ISO strings too.
             func date(_ v: Any?) -> Date? {
                 if let n = v as? Double { return Date(timeIntervalSince1970: n > 1e11 ? n / 1000 : n) }
@@ -60,6 +60,7 @@ enum SessionStore {
                 ?? (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
             sessions.append(ClaudeSession(id: id, title: title, lastUsed: date))
         }
-        return Array(sessions.sorted { $0.lastUsed > $1.lastUsed }.prefix(limit))
+        var titles = Set<String>()
+        return Array(sessions.sorted { $0.lastUsed > $1.lastUsed }.filter { titles.insert($0.title).inserted }.prefix(limit))
     }
 }

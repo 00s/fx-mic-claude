@@ -31,11 +31,15 @@ final class AppController {
         ])
     }
     var onStateChange: (() -> Void)?
+    /// The bottom button asked for the panel; the menu bar item owns it.
+    var onPanelRequest: (() -> Void)?
     var onActivity: ((StatusMenu.Activity) -> Void)?
     var onRecentChange: (() -> Void)?
 
     let settings = Settings.shared
     let hud = HUDController()
+    /// What the mic is doing right now, for the panel's drawing of it.
+    let live = LiveMic()
     let dispatcher = Dispatcher()
     private let activity = ActivityWatcher()
     /// Claude's own dictation, used when settings.transcriptionEngine is "claude".
@@ -152,8 +156,8 @@ final class AppController {
         let now = Date()
         guard now.timeIntervalSince(lastToggle) > 0.6 else { Log.write("toggle from \(source) ignored (debounce)"); return }
         lastToggle = now
-        Log.write("toggle from \(source): \(state == .idle ? "pick up" : "hang up")")
-        state == .idle ? arm() : disarm(reason: "hung up via \(source)")
+        Log.write("toggle from \(source): \(state == .idle ? "unmute" : "mute")")
+        state == .idle ? arm() : disarm(reason: "muted via \(source)")
     }
 
     func arm() {
@@ -533,10 +537,12 @@ final class AppController {
     }
 
     private var hudShownForSerial = -1
-    /// Where Apple-mode text will go: the session picked in the menu, else the last used one, else the inbox target.
+    /// Where Apple-mode text will go: the pinned conversation, else the one on screen, else the inbox target.
     private var expectedTarget: String? {
         if settings.composerDelivery, ComposerDelivery.isTrusted,
-           let title = settings.targetSessionTitle ?? SessionStore.lastUsed()?.title { return title }
+           ClaudeApp.running != nil {
+            return settings.targetSessionTitle ?? ComposerDelivery.onScreenTitle() ?? "Conversation on screen"
+        }
         return dispatcher.currentTarget?.title ?? "No session armed: will copy to the clipboard"
     }
 
@@ -563,6 +569,16 @@ final class AppController {
         let viaClaude = claudeSqueeze
         claudeSqueeze = false
         let t = appleWanted ? transcriber : nil
+        // Shaken: already canceled and cleared. Only close the recognizer's utterance; nothing to wait for or deliver.
+        if canceled {
+            if let t { Task.detached { _ = await t.finishUtterance() } }
+            DispatchQueue.main.async {
+                if self.activeSqueeze == serial { self.activeSqueeze = nil }
+                self.canceledSerials.remove(serial)
+                self.intents[serial] = nil
+            }
+            return
+        }
         guard t != nil || viaClaude else {
             DispatchQueue.main.async { self.hud.flash("Transcriber not ready yet", tint: .yellow, icon: "hourglass") }
             return
@@ -621,6 +637,7 @@ final class AppController {
     private var appleWanted: Bool { settings.transcriptionEngine != "claude" || settings.appleFallback }
 
     private func squeezeStarted() {
+        DispatchQueue.main.async { self.live.squeeze(true) }
         lastActivity = Date()
         squeezeStartedAt = Date()
         lastSpeechAt = .distantPast
@@ -636,6 +653,7 @@ final class AppController {
     }
 
     private func squeezeEnded() {
+        DispatchQueue.main.async { self.live.squeeze(false) }
         Log.write("handle released" + (usbLive ? " (usb)" : ""))
         handleMode = false
         endUtterance(frames: openFrames)
@@ -645,10 +663,20 @@ final class AppController {
 
     private func shakeCancel() {
         guard settings.shakeToCancel else { return }
+        DispatchQueue.main.async { self.live.shake() }
         Log.write("shake: cancel")
         let serial = utteranceSerial
         canceled = true
-        DispatchQueue.main.async { self.canceledSerials.insert(serial); self.hud.canceled() }
+        // Cancel takes effect now, not at the release: Claude stops listening and the composer goes back as it was.
+        let wasDictating = claudeSqueeze
+        claudeSqueeze = false
+        if wasDictating { dictation.abort() }
+        DispatchQueue.main.async {
+            self.canceledSerials.insert(serial)
+            self.claudeLive = false
+            self.dictatedSession[serial] = nil
+            self.hud.canceled()
+        }
     }
 
     private func usbEvent(_ event: MicSerial.Event) {
@@ -660,7 +688,7 @@ final class AppController {
             case .press:
                 pendingWakeSqueeze = true
                 DispatchQueue.main.async {
-                    Log.write("usb: squeeze while hung up, picking up")
+                    Log.write("usb: squeeze while muted, unmuting")
                     self.arm()
                     self.pipeline.async {
                         guard self.pendingWakeSqueeze else { return }
@@ -672,7 +700,7 @@ final class AppController {
                 pendingWakeSqueeze = false          // released before FXMic was ready: too short to be a message
             case .tap:
                 DispatchQueue.main.async {
-                    Log.write("usb: tap while hung up, picking up")
+                    Log.write("usb: tap while muted, unmuting")
                     self.ignoreTapsUntil = Date().addingTimeInterval(0.6)
                     self.arm()
                 }
@@ -713,6 +741,8 @@ final class AppController {
 
     private func usbLiveChanged(_ live: Bool) {
         usbLiveMain = live
+        self.live.usb = live
+        onStateChange?()
         Log.write(live ? "usb: the mic reports squeezes; the input stays closed between squeezes"
                        : "usb: no squeeze reports; listening for the marker tones")
         snapshot()
@@ -778,7 +808,7 @@ final class AppController {
     private func startClaudeDictation() {
         claudeSqueeze = true
         let serial = utteranceSerial
-        let target = settings.targetSessionTitle ?? SessionStore.lastUsed()?.title
+        let target = settings.targetSessionTitle              // only a pin switches conversations
         DispatchQueue.main.async { self.hud.starting() }
         dictation.start(serial: serial, target: target) { [weak self] result in
             guard let self else { return }
@@ -786,11 +816,17 @@ final class AppController {
             case .success(let session):
                 self.claudeLive = true
                 if !session.isEmpty { self.dictatedSession[serial] = session }
-                self.hud.listeningReady(session: session)
+                self.hud.listeningReady(session: session.isEmpty ? "Conversation on screen" : session)
             case .failure(let error):
-                Log.write("dictation: could not start (\(error)), Apple's recognizer takes this message")
                 self.claudeLive = false
-                self.hud.listeningReady(session: self.expectedTarget)
+                if self.settings.appleFallback {
+                    Log.write("dictation: could not start (\(error)), Apple's recognizer takes this message")
+                    self.hud.listeningReady(session: self.expectedTarget)
+                } else if error != .notRunning {                // nothing is recording this squeeze: say so
+                    Log.write("dictation: could not start (\(error))")
+                    self.hud.flash("Not listening", detail: "Claude has no text box with a mic on screen (\(error)).",
+                                   tint: .red, icon: "mic.slash", seconds: 4)
+                }
             }
         }
     }
@@ -805,6 +841,8 @@ final class AppController {
     private func pick(apple: UtteranceResult, claude: Result<String, ClaudeDictation.Failure>?, serial: Int) -> UtteranceResult {
         DispatchQueue.main.async { self.claudeLive = false }
         guard let claude else { return apple }
+        // Not even Apple's text: it would go to whichever conversation is on screen now.
+        if case .failure(.switched) = claude { return UtteranceResult(text: "", locale: "switched", confidence: 0, alternatives: []) }
         let appleLine = String(format: "apple [%@ %.2f]: %@", apple.locale, apple.confidence, Log.text(apple.text))
         switch claude {
         case .success(let text) where !text.isEmpty:
@@ -825,6 +863,15 @@ final class AppController {
         // Text dictated in Claude goes back to the session it was spoken into.
         let dictatedIn = dictatedSession.removeValue(forKey: serial)
         let inComposer = result.locale == "claude"      // Claude's dictation left this text in the composer
+        if result.locale == "switched" {
+            canceledSerials.remove(serial)
+            intents.removeValue(forKey: serial)
+            if activeSqueeze == nil {
+                hud.flash("Not sent", detail: "You switched conversations while talking.", tint: .orange,
+                          icon: "arrow.left.arrow.right", seconds: 3)
+            }
+            return
+        }
         if canceledSerials.remove(serial) != nil {
             Log.write("canceled: \(Log.text(result.text))")
             if inComposer { dictation.complete(serial: serial, action: .discard) { _ in } }
@@ -833,7 +880,9 @@ final class AppController {
         }
         let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
         let letters = text.unicodeScalars.filter { CharacterSet.letters.contains($0) }.count
-        guard letters >= 2, speechSeconds >= 0.4, result.confidence >= 0.35 else {
+        // The speech-length check measures FXMic's own input, which in Claude mode may open late (over USB) or serve
+        // only the meter; Claude's text is the evidence that something was said.
+        guard letters >= 2, inComposer || speechSeconds >= 0.4, result.confidence >= 0.35 else {
             Log.write(String(format: "dropped: %@ (%.1fs speech, conf %.2f)", Log.text(text), speechSeconds, result.confidence))
             if inComposer { dictation.complete(serial: serial, action: .discard) { _ in } }
             if activeSqueeze == nil { hud.hide(after: 0.2) }
@@ -846,30 +895,32 @@ final class AppController {
         }
         let outcome: String
         var hudTitle = "Sent"
-        if settings.composerDelivery, ComposerDelivery.isTrusted, intent != .send,
-           let target = dictatedIn ?? settings.targetSessionTitle ?? SessionStore.lastUsed()?.title {
+        // The pinned conversation, else whatever is on screen (nil title: a Project or a new chat).
+        let pin = settings.targetSessionTitle
+        let target = pin ?? ComposerDelivery.onScreenTitle()
+        // Queueing needs a title to watch for the turn's end; without one the words are left as a draft.
+        if settings.composerDelivery, ComposerDelivery.isTrusted, intent == .draft || (intent == .queue && target != nil) {
             if intent == .draft {
                 do {
-                    try ComposerDelivery.send(text, toSessionTitled: target, pressSend: false)
-                    outcome = "Draft in \(target)"
+                    try ComposerDelivery.send(text, toSessionTitled: pin, pressSend: false)
+                    outcome = "Draft in \(target ?? "the conversation on screen")"
                 } catch {
                     copiedToClipboard(text, why: "The draft couldn't be added in Claude")
                     outcome = "Draft failed (\(error)), copied"
                 }
                 hudTitle = "Draft"
-            } else {
+            } else if let target {
                 queued.append((text, target, Date()))
                 outcome = "Queued for \(target)"
                 hudTitle = "Queued"
                 startQueue()
+            } else {
+                outcome = inboxOutcome(text: text, result: result, speechSeconds: speechSeconds)
             }
-            if settings.targetSessionTitle != nil { settings.targetSessionTitle = nil }
         } else if settings.composerDelivery, ComposerDelivery.isTrusted {
             do {
-                let target = dictatedIn ?? settings.targetSessionTitle ?? SessionStore.lastUsed()?.title
-                try ComposerDelivery.send(text, toSessionTitled: target)
-                outcome = target.map { "Sent to \($0)" } ?? "Sent to Claude"
-                if settings.targetSessionTitle != nil { settings.targetSessionTitle = nil }   // it is the last used now
+                try ComposerDelivery.send(text, toSessionTitled: pin, pressSend: intent == .send)
+                outcome = intent == .send ? target.map { "Sent to \($0)" } ?? "Sent to Claude" : "Draft in the conversation on screen"
                 if let target {
                     activity.watch(sessionTitle: target, onThinking: { [weak self] in
                         Log.write("activity: \(target) is thinking")
@@ -900,7 +951,7 @@ final class AppController {
     /// queueing fails, the composer is put back as it was and the text goes to FXMic's own queue or the inbox.
     private func deliverInComposer(_ text: String, intent: Intent, session: String?, serial: Int, speechSeconds: Double) {
         let action: ClaudeDictation.Action = intent == .draft ? .keep : intent == .queue ? .queue : .send
-        let target = session ?? settings.targetSessionTitle ?? SessionStore.lastUsed()?.title
+        let target = session                 // where it was dictated; nil when that conversation has no readable title
         dictation.complete(serial: serial, action: action) { [weak self] result in
             guard let self else { return }
             let name = target ?? "Claude"
@@ -909,6 +960,12 @@ final class AppController {
             switch result {
             case .success(.kept):
                 outcome = "Draft in \(name)"; title = "Draft"
+            case .success(.keptDraftChanged):
+                outcome = "Left as a draft in \(name): the earlier draft changed, so it wasn't sent"; title = "Left as draft"
+            case .success(.keptPinMissed):
+                outcome = "Pinned chat not found: left as a draft in \(name)"; title = "Left as draft"
+            case .success(.keptSwitched):
+                outcome = "Not sent: you switched conversations while talking"; title = "Not sent"
             case .success(.sent):
                 outcome = "Sent to \(name)"
                 if let target { self.watchActivity(target) }
@@ -926,12 +983,11 @@ final class AppController {
                     outcome = self.inboxOutcome(text: text, result: UtteranceResult(text: text, locale: "claude", confidence: 1, alternatives: []), speechSeconds: speechSeconds)
                 }
             }
-            if self.settings.targetSessionTitle != nil { self.settings.targetSessionTitle = nil }
             Log.write(String(format: "%@: %@  [claude, %.1fs]", outcome, Log.text(text), speechSeconds))
             self.recent.insert((Date(), text, outcome), at: 0)
             if self.recent.count > 12 { self.recent.removeLast() }
             self.lastActivity = Date()
-            if self.activeSqueeze == nil { self.hud.sent(text, outcome: outcome, title: title) }
+            if self.activeSqueeze == nil, !outcome.lowercased().contains("copied") { self.hud.sent(text, outcome: outcome, title: title) }
             self.onRecentChange?()
         }
     }
@@ -948,6 +1004,7 @@ final class AppController {
 
     /// Records the queue/draft choice for the squeeze in progress and shows it in the Listening bar. Capture queue.
     private func setIntent(_ intent: Intent) {
+        DispatchQueue.main.async { self.live.press(intent == .queue ? 0 : 1) }
         let serial = utteranceSerial
         Log.write("during squeeze: \(intent == .queue ? "top (FX) button: queue" : "middle (sample) button: draft")")
         DispatchQueue.main.async {
@@ -1083,10 +1140,18 @@ final class AppController {
     // MARK: button gestures (main)
 
     private func tapAction(count: Int, duringSpeech: Bool) {
+        if !duringSpeech { live.press(2) }
         Log.write("tap x\(count)\(duringSpeech ? " while squeezed (ignored)" : "")")
         if duringSpeech { return }          // cancel is a shake now; the button does nothing while the handle is in
         lastActivity = Date()
-        if count == 1 { ClaudeApp.toggle() } else { disarm(reason: "double tap") }
+        // Over USB there is nothing to mute (the input is already closed between squeezes): a double tap does nothing.
+        guard count == 1 else { if !usbLiveMain { live.last = .hangUp; disarm(reason: "double tap") }; return }
+        switch settings.bottomButton {
+        case "claude": ClaudeApp.show()
+        case "toggle": ClaudeApp.toggle()
+        case "none": break
+        default: onPanelRequest?()
+        }
     }
 
 
