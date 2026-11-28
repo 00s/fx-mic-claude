@@ -253,7 +253,10 @@ struct IslandStack<Action: View>: View {
     /// The state colors, dark enough to read on light glass.
     private func readable(_ color: Color) -> Color {
         guard scheme == .light else { return color }
-        return color == .yellow ? Ink.of(.light).live : color.mix(with: .black, by: 0.3)
+        // Each state keeps its own hue on light glass: Listening a deep yellow, Queue (and weak signal) a clear orange.
+        if color == .yellow { return Color(.sRGB, red: 0.80, green: 0.60, blue: 0.0, opacity: 1) }
+        if color == .orange { return Color(.sRGB, red: 0.91, green: 0.40, blue: 0.06, opacity: 1) }
+        return color.mix(with: .black, by: 0.3)
     }
 }
 
@@ -388,7 +391,9 @@ struct LiquidLevel: View {
                         Ellipse()
                             .fill(color.opacity(i == 0 ? 0.75 : 0.5))
                             .frame(width: w * (0.28 + 0.55 * level), height: h * (0.7 + 0.9 * level))
-                            .position(x: w * (i == 0 ? 0.26 : 0.68) + CGFloat(drift) * w * 0.14,
+                            // One pool from the left: the second blob is its front edge, as far right as the voice
+                            // is loud, so the color never shows as a separate patch on the right.
+                            .position(x: w * (i == 0 ? 0.24 : 0.2 + 0.48 * level) + CGFloat(drift) * w * (i == 0 ? 0.1 : 0.05),
                                       y: h * 0.5 + CGFloat(cos(t * 1.7 + Double(i))) * h * 0.18)
                     }
                 }
