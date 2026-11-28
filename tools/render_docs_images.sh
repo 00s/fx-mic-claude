@@ -17,7 +17,7 @@ swiftc -O -I .build/release/Modules -module-name DocsImages -o "$WORK/render" \
 OUT=docs/images
 mkdir -p "$OUT"
 cp "$WORK/hero.png" "$OUT/hero.png"; sips -Z 2000 "$OUT/hero.png" >/dev/null       # transparent: one image for light and dark
-for f in states gestures; do
+for f in states gestures how; do
   for s in light dark; do cp "$WORK/$f-$s.png" "$OUT/"; sips -Z 1800 "$OUT/$f-$s.png" >/dev/null; done
 done
 for g in send queue draft cancel; do
