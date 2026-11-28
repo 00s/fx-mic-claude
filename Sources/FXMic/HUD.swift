@@ -742,3 +742,38 @@ final class HUDController {
         hide(after: seconds)
     }
 }
+
+/// Debug: the mic glyph in both corner styles, every part it marks, light and dark, at menu bar and panel sizes, to
+/// judge sharp against rounded corners. Written by the `~/.fxmic/glyphs` hook.
+enum GlyphSheet {
+    static func write(to url: URL) {
+        let parts = [MicButtonGlyph.none, 0, 1, 2, MicButtonGlyph.squeeze, MicButtonGlyph.shake]
+        let sheet = VStack(alignment: .leading, spacing: 18) {
+            ForEach([true, false], id: \.self) { sharp in
+                ForEach([ColorScheme.light, .dark], id: \.self) { scheme in
+                    let line: Color = scheme == .dark ? Color(white: 0.85) : Color(white: 0.3)
+                    HStack(spacing: 22) {
+                        Text(sharp ? "Sharp" : "Rounded").font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(scheme == .dark ? Color.white : .black).frame(width: 70, alignment: .leading)
+                        MicButtonGlyph(pressed: MicButtonGlyph.none, line: scheme == .dark ? .white : .black, side: 20, solid: true, sharp: sharp)
+                        ForEach(parts, id: \.self) { part in
+                            MicButtonGlyph(pressed: part, line: line, side: 34, pull: part == MicButtonGlyph.squeeze ? 1 : 0, sharp: sharp)
+                        }
+                        MicButtonGlyph(pressed: 0, line: line, side: 64, sharp: sharp)
+                    }
+                    .padding(14)
+                    .background(scheme == .dark ? Color(white: 0.12) : Color(white: 0.95), in: RoundedRectangle(cornerRadius: 12))
+                }
+            }
+        }
+        .padding(20).background(Color.white)
+        let png = MainActor.assumeIsolated { () -> Data? in
+            let renderer = ImageRenderer(content: sheet)
+            renderer.scale = 2
+            guard let cg = renderer.cgImage else { return nil }
+            return NSBitmapImageRep(cgImage: cg).representation(using: .png, properties: [:])
+        }
+        if let png { try? png.write(to: url) }
+        Log.write("debug: wrote glyph sheet")
+    }
+}

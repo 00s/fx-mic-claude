@@ -110,6 +110,10 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             guard let self, let button = self.item.button else { return }
             self.panel.toggle(under: button)
         }
+        controller.onPanelPage = { [weak self] page in
+            guard let self, let button = self.item.button else { return }
+            self.panel.show(page: page, under: button)
+        }
         // Queue, draft and shake change the icon too; wait a turn so the new value is in place.
         watch = [
             controller.hud.model.$intent.receive(on: RunLoop.main).sink { [weak self] _ in self?.refresh() },

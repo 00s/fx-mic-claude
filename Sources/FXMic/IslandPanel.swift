@@ -575,6 +575,14 @@ final class IslandPanelController: NSObject {
         if panel != nil { close() } else { open(under: button) }
     }
 
+    /// Debug: open (if needed) on a named page.
+    func show(page: String, under button: NSStatusBarButton) {
+        if panel == nil { open(under: button) }
+        let pages: [String: PanelModel.Page] = ["main": .main, "pick": .pick, "gestures": .gestures, "settings": .settings]
+        withAnimation(.snappy) { model.page = pages[page] ?? .main }
+        if model.page == .pick { model.loadPickable() }
+    }
+
     private func open(under button: NSStatusBarButton) {
         model.page = .main
         model.reload()

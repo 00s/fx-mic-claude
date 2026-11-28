@@ -33,6 +33,8 @@ final class AppController {
     var onStateChange: (() -> Void)?
     /// The bottom button asked for the panel; the menu bar item owns it.
     var onPanelRequest: (() -> Void)?
+    /// Debug: open the panel on a page ("main", "pick", "gestures", "settings").
+    var onPanelPage: ((String) -> Void)?
     var onActivity: ((StatusMenu.Activity) -> Void)?
     var onRecentChange: (() -> Void)?
 
@@ -1078,6 +1080,18 @@ final class AppController {
             if FileManager.default.fileExists(atPath: demoURL.path) {
                 try? FileManager.default.removeItem(at: demoURL)
                 self.hudDemo()
+            }
+            // Debug hooks for screenshots: `echo gestures > ~/.fxmic/panelpage` opens the panel on that page;
+            // `touch ~/.fxmic/glyphs` writes ~/.fxmic/glyphs.png, the mic glyph with sharp and rounded corners.
+            let pageURL = self.dispatcher.root.appendingPathComponent("panelpage")
+            if let page = try? String(contentsOf: pageURL, encoding: .utf8) {
+                try? FileManager.default.removeItem(at: pageURL)
+                self.onPanelPage?(page.trimmingCharacters(in: .whitespacesAndNewlines))
+            }
+            let glyphURL = self.dispatcher.root.appendingPathComponent("glyphs")
+            if FileManager.default.fileExists(atPath: glyphURL.path) {
+                try? FileManager.default.removeItem(at: glyphURL)
+                GlyphSheet.write(to: self.dispatcher.root.appendingPathComponent("glyphs.png"))
             }
             guard let data = try? Data(contentsOf: url), let text = String(data: data, encoding: .utf8) else { return }
             try? FileManager.default.removeItem(at: url)
