@@ -33,6 +33,8 @@ final class AppController {
     var onStateChange: (() -> Void)?
     /// The bottom button asked for the panel; the menu bar item owns it.
     var onPanelRequest: (() -> Void)?
+    /// Debug: open the panel on a page ("main", "pick", "gestures", "settings").
+    var onPanelPage: ((String) -> Void)?
     var onActivity: ((StatusMenu.Activity) -> Void)?
     var onRecentChange: (() -> Void)?
 
@@ -166,7 +168,7 @@ final class AppController {
         case .notDetermined:
             Log.write("waiting for microphone permission")
             snapshot()
-            hud.flash("Microphone permission", detail: "Click Allow in the macOS dialog, then FXMic starts listening.", tint: .blue, icon: "mic.badge.plus", seconds: 6)
+            hud.flash("Microphone permission", detail: "Click Allow in the macOS dialog, then \(AppName.display) starts listening.", tint: .blue, icon: "mic.badge.plus", seconds: 6)
             AVCaptureDevice.requestAccess(for: .audio) { granted in
                 DispatchQueue.main.async {
                     if granted { self.arm() } else { self.lastError = "Microphone access denied"; self.onStateChange?() }
@@ -174,10 +176,10 @@ final class AppController {
             }
             return
         case .denied, .restricted:
-            lastError = "Microphone access denied. Allow FXMic in System Settings > Privacy & Security > Microphone."
+            lastError = "Microphone access denied. Allow \(AppName.display) in System Settings > Privacy & Security > Microphone."
             Log.write(lastError!)
             snapshot()
-            hud.flash("Microphone access denied", detail: "System Settings > Privacy & Security > Microphone > FXMic", tint: .red, icon: "mic.slash", seconds: 4)
+            hud.flash("Microphone access denied", detail: "System Settings > Privacy & Security > Microphone > \(AppName.display)", tint: .red, icon: "mic.slash", seconds: 4)
             onStateChange?()
             return
         default:
@@ -1078,6 +1080,18 @@ final class AppController {
             if FileManager.default.fileExists(atPath: demoURL.path) {
                 try? FileManager.default.removeItem(at: demoURL)
                 self.hudDemo()
+            }
+            // Debug hooks for screenshots: `echo gestures > ~/.fxmic/panelpage` opens the panel on that page;
+            // `touch ~/.fxmic/glyphs` writes ~/.fxmic/glyphs.png, the mic glyph with sharp and rounded corners.
+            let pageURL = self.dispatcher.root.appendingPathComponent("panelpage")
+            if let page = try? String(contentsOf: pageURL, encoding: .utf8) {
+                try? FileManager.default.removeItem(at: pageURL)
+                self.onPanelPage?(page.trimmingCharacters(in: .whitespacesAndNewlines))
+            }
+            let glyphURL = self.dispatcher.root.appendingPathComponent("glyphs")
+            if FileManager.default.fileExists(atPath: glyphURL.path) {
+                try? FileManager.default.removeItem(at: glyphURL)
+                GlyphSheet.write(to: self.dispatcher.root.appendingPathComponent("glyphs.png"))
             }
             guard let data = try? Data(contentsOf: url), let text = String(data: data, encoding: .utf8) else { return }
             try? FileManager.default.removeItem(at: url)

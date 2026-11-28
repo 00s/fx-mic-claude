@@ -110,6 +110,10 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             guard let self, let button = self.item.button else { return }
             self.panel.toggle(under: button)
         }
+        controller.onPanelPage = { [weak self] page in
+            guard let self, let button = self.item.button else { return }
+            self.panel.show(page: page, under: button)
+        }
         // Queue, draft and shake change the icon too; wait a turn so the new value is in place.
         watch = [
             controller.hud.model.$intent.receive(on: RunLoop.main).sink { [weak self] _ in self?.refresh() },
@@ -139,7 +143,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         case .done: item.button?.image = image(check: true)
         case .none: item.button?.image = image()
         }
-        item.button?.toolTip = "FXMic: \(controller.state.rawValue). Click for the panel, right-click to \(controller.state == .idle ? "unmute" : "mute")."
+        item.button?.toolTip = "\(AppName.display): \(controller.state.rawValue). Click for the panel, right-click to \(controller.state == .idle ? "unmute" : "mute")."
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
@@ -243,7 +247,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         menu.addItem(.separator())
 
         // 5. quit
-        let quitItem = NSMenuItem(title: "Quit FXMic", action: #selector(quit), keyEquivalent: "q")
+        let quitItem = NSMenuItem(title: "Quit \(AppName.display)", action: #selector(quit), keyEquivalent: "q")
         quitItem.target = self
         menu.addItem(quitItem)
     }

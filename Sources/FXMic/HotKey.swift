@@ -75,7 +75,7 @@ final class ShortcutRecorder: NSObject, NSWindowDelegate {
         done = completion
         let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 340, height: 110),
                             styleMask: [.titled, .closable], backing: .buffered, defer: false)
-        panel.title = "FXMic mute shortcut"
+        panel.title = "\(AppName.display) mute shortcut"
         panel.level = .floating
         panel.isReleasedWhenClosed = false
         panel.delegate = self
