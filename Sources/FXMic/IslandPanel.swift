@@ -600,28 +600,21 @@ struct PanelView: View {
     /// Below the squeeze rail: the same rail for what the buttons do with the handle released, then one card that only
     /// holds the drawing and its caption, whatever is picked above.
     @ViewBuilder func gesturesPage(_ ink: Ink) -> some View {
-        let claude = chosen == .claude
-        let mode: MicGesture = claude ? .claude : .ko2
-        let released: [MicGesture] = live.usb ? [.show, mode] : [.show, .hangUp, mode]
+        // Each mode switch has its own item: the top and middle holds are different actions.
+        let released: [MicGesture] = live.usb ? [.show, .claude, .ko2] : [.show, .hangUp, .claude, .ko2]
         VStack(spacing: 10) {
             ActionRail(items: released.map { gesture in
                 switch gesture {
                 case .show: RailItem(bottomButtonLabel) { MicButtonGlyph(pressed: 2, line: ink.secondary) }
                 case .hangUp: RailItem("Twice to\nmute") { MicButtonGlyph(pressed: 2, line: ink.secondary) }
-                default: RailItem(claude ? "Hold top\nfor Claude" : "Hold middle\nfor K.O. II") {
-                    MicButtonGlyph(pressed: claude ? 0 : 1, line: ink.secondary)
-                }
+                case .ko2: RailItem("Hold middle\nfor K.O. II") { MicButtonGlyph(pressed: 1, line: ink.secondary) }
+                default: RailItem("Hold top\nfor Claude") { MicButtonGlyph(pressed: 0, line: ink.secondary) }
                 }
             }, selected: live.squeezing ? nil : released.firstIndex(of: doing), onPick: { chosen = released[$0] })
             MicDemo(chosen: chosen, ink: ink, live: live, island: island).id(chosen)
                 .frame(maxWidth: .infinity, minHeight: 232, maxHeight: 232)
                 .padding(10)
                 .frosted(RoundedRectangle(cornerRadius: 24, style: .continuous), tint: ink.wash)
-        }
-        .task(id: chosen) {          // the mode item plays both directions in turn
-            guard chosen.isModeSwitch else { return }
-            try? await Task.sleep(for: .seconds(5.4))
-            if !Task.isCancelled { withAnimation(.snappy) { chosen = chosen == .ko2 ? .claude : .ko2 } }
         }
     }
 
