@@ -166,7 +166,7 @@ final class AppController {
         case .notDetermined:
             Log.write("waiting for microphone permission")
             snapshot()
-            hud.flash("Microphone permission", detail: "Click Allow in the macOS dialog, then FXMic starts listening.", tint: .blue, icon: "mic.badge.plus", seconds: 6)
+            hud.flash("Microphone permission", detail: "Click Allow in the macOS dialog, then \(AppName.display) starts listening.", tint: .blue, icon: "mic.badge.plus", seconds: 6)
             AVCaptureDevice.requestAccess(for: .audio) { granted in
                 DispatchQueue.main.async {
                     if granted { self.arm() } else { self.lastError = "Microphone access denied"; self.onStateChange?() }
@@ -174,10 +174,10 @@ final class AppController {
             }
             return
         case .denied, .restricted:
-            lastError = "Microphone access denied. Allow FXMic in System Settings > Privacy & Security > Microphone."
+            lastError = "Microphone access denied. Allow \(AppName.display) in System Settings > Privacy & Security > Microphone."
             Log.write(lastError!)
             snapshot()
-            hud.flash("Microphone access denied", detail: "System Settings > Privacy & Security > Microphone > FXMic", tint: .red, icon: "mic.slash", seconds: 4)
+            hud.flash("Microphone access denied", detail: "System Settings > Privacy & Security > Microphone > \(AppName.display)", tint: .red, icon: "mic.slash", seconds: 4)
             onStateChange?()
             return
         default:

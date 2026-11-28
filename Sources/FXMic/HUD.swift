@@ -2,6 +2,29 @@ import AppKit
 import QuartzCore
 import SwiftUI
 
+/// The panel's one set of sizes. Every bar is one height, every row another, and every corner is concentric with the
+/// card around it (inner radius = card radius - the card's padding), so the pieces read as one family.
+enum Metric {
+    /// The status pill, the page buttons and the mute button.
+    static let bar: CGFloat = 56
+    /// Every list and settings row, and the search field.
+    static let row: CGFloat = 44
+    /// Every card and rail track.
+    static let card: CGFloat = 26
+    /// Inside a card, around its rows.
+    static let pad: CGFloat = 8
+    /// Rows, fields, groups and the rail's drop: concentric with the card they sit in.
+    static var inner: CGFloat { card - pad }
+    /// Between pieces.
+    static let gap: CGFloat = 10
+}
+
+/// The name people see. The bundle, its identifier, the executable and ~/.fxmic keep "FXMic" so permission grants,
+/// logs and the tools keep working.
+enum AppName {
+    static let display = "Squeeze"
+}
+
 final class HUDModel: ObservableObject {
     @Published var title = ""
     @Published var body = ""
@@ -27,6 +50,10 @@ struct IslandStack<Action: View>: View {
     @ObservedObject var model: HUDModel
     /// Set when the island itself has nothing to say (the panel between messages): shown instead of its state.
     var idle: (title: String, icon: String, live: Bool)? = nil
+    /// The idle pill's own color (the panel's inviting "Open the mic"); nil keeps the usual one.
+    var idleTint: Color? = nil
+    /// Makes the idle pill a button: the panel's "Open the mic" opens it.
+    var onIdleTap: (() -> Void)? = nil
     /// Off where the conversation is already named right below (the panel's "Send to" list).
     var showsDestination = true
     /// Between messages: where the next one will go, so the card is there with it. Only the panel sets this.
@@ -65,13 +92,16 @@ struct IslandStack<Action: View>: View {
         // Every piece is its own glass over the screen, in one container: no glass on glass, and they morph together.
         GlassEffectContainer(spacing: 6) {
         VStack(spacing: 10) {
-            HStack(spacing: 10) {
-                status(ink)
+            HStack(spacing: Metric.gap) {
+                statusButton(ink)
                 action
             }
-            // The words are their own section; what you can do with them sits below it.
+            // The words are their own section; what you can do with them sits below it. Muting and unmuting slide the
+            // "Send to" line out and back in, so it reads as the mic's reach going away and coming back.
             if hasDestination || (idle == nil && !model.body.isEmpty) {
-                transcript(ink).transition(.opacity)
+                transcript(ink).transition(.asymmetric(
+                    insertion: .scale(scale: 0.9, anchor: .top).combined(with: .offset(y: -14)).combined(with: .opacity),
+                    removal: .scale(scale: 0.94, anchor: .top).combined(with: .offset(y: -8)).combined(with: .opacity)))
             }
             if let fixed { fixed }
             if squeezing || railAlways {
@@ -87,6 +117,17 @@ struct IslandStack<Action: View>: View {
         .animation(.easeInOut(duration: 0.2), value: model.body.isEmpty)
         .animation(.easeInOut(duration: 0.2), value: model.footer)
         .animation(.easeInOut(duration: 0.2), value: model.intent)
+        .animation(.spring(response: 0.42, dampingFraction: 0.82), value: hasDestination)
+    }
+
+    @ViewBuilder private func statusButton(_ ink: Ink) -> some View {
+        if idle != nil, let onIdleTap {
+            Button(action: onIdleTap) { status(ink) }
+                .buttonStyle(.plain)
+                .accessibilityHint("Opens the mic")
+        } else {
+            status(ink)
+        }
     }
 
     /// 0 to 1 while the mic is being heard, nil otherwise.
@@ -97,7 +138,7 @@ struct IslandStack<Action: View>: View {
 
     private func status(_ ink: Ink) -> some View {
         let active = idle == nil
-        let tint: Color = active ? readable(statusColor) : idle!.live ? ink.live : ink.secondary
+        let tint: Color = active ? readable(statusColor) : idleTint ?? (idle!.live ? ink.live : ink.secondary)
         return HStack(spacing: 12) {
             Group {
                 if active && model.loading {
@@ -114,7 +155,7 @@ struct IslandStack<Action: View>: View {
                 .contentTransition(.identity)
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 14).frame(height: 56).frame(maxWidth: .infinity)
+        .padding(.horizontal, 14).frame(height: Metric.bar).frame(maxWidth: .infinity)
         // While it hears you, color pools inside the glass and flows: it reaches further the louder you are and keeps
         // drifting, so it reads as liquid rather than a meter. (A glass tint itself snaps instead of animating.)
         .background {
@@ -152,7 +193,6 @@ struct IslandStack<Action: View>: View {
         VStack(alignment: .leading, spacing: 12) {
             if hasDestination {
                 HStack(spacing: 6) {
-                    ClaudeIcon(size: 16)
                     Text("Send to")
                     Text(destination).foregroundStyle(ink.primary).lineLimit(1).truncationMode(.tail)
                     Spacer(minLength: 4)
@@ -177,7 +217,7 @@ struct IslandStack<Action: View>: View {
         }
         .padding(.horizontal, 22).padding(.vertical, 18)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .frosted(RoundedRectangle(cornerRadius: 22, style: .continuous), tint: ink.dense)
+        .frosted(RoundedRectangle(cornerRadius: Metric.card, style: .continuous), tint: ink.dense)
     }
 
     /// What this squeeze can become, drawn where to do it: let go to send, top button to queue, middle to draft,
@@ -256,10 +296,10 @@ struct ActionRail: View {
             // sets off and settling with a little give. Drawn, not a glass layer: glass draws over the content here.
             GeometryReader { geo in
                 let width = geo.size.width / CGFloat(max(1, items.count))
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                RoundedRectangle(cornerRadius: Metric.inner, style: .continuous)
                     .fill(LinearGradient(colors: [ink.primary.opacity(0.20), ink.primary.opacity(0.09)],
                                          startPoint: .top, endPoint: .bottom))
-                    .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(
+                    .overlay(RoundedRectangle(cornerRadius: Metric.inner, style: .continuous).strokeBorder(
                         LinearGradient(colors: [.white.opacity(0.65), .white.opacity(0.08), ink.primary.opacity(0.22)],
                                        startPoint: .top, endPoint: .bottom),
                         lineWidth: 1))
@@ -275,11 +315,11 @@ struct ActionRail: View {
                     .opacity(selected == nil ? 0 : 1)
             }
         }
-        .padding(6)
+        .padding(Metric.pad)
         // The track is frost.
-        .background(ink.dense, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous).strokeBorder(ink.primary.opacity(0.10), lineWidth: 1))
+        .background(ink.dense, in: RoundedRectangle(cornerRadius: Metric.card, style: .continuous))
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: Metric.card, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: Metric.card, style: .continuous).strokeBorder(ink.primary.opacity(0.10), lineWidth: 1))
         .animation(.spring(response: 0.42, dampingFraction: 0.68), value: selected)
     }
 }
@@ -344,6 +384,10 @@ struct MicButtonGlyph: View {
     /// The menu bar's version: the lower half filled white and the speaker holes bigger, so it reads as its own mark
     /// at that size. Inside the app the glyph stays an outline.
     var solid = false
+    /// Corners like the real mic's, nearly square, or the softer rounded drawing. Sharp is the default: at 20 to 34 pt
+    /// the near-square body is what makes it read as this mic rather than a generic handset.
+    var sharp = MicButtonGlyph.sharpCorners
+    static let sharpCorners = true
     static let size = CGSize(width: 34, height: 34)
 
     var body: some View {
@@ -360,6 +404,9 @@ struct MicButtonGlyph: View {
                 Color(.sRGB, red: Double(h >> 16 & 255) / 255, green: Double(h >> 8 & 255) / 255, blue: Double(h & 255) / 255, opacity: 1)
             }
             let squeezing = pressed == Self.squeeze
+            // In drawing units (the body is 744 wide): the mic's own corners are about 3% of its width.
+            let bodyRadius: Double = sharp ? 26 : 90
+            let buttonRadius: Double = sharp ? 14 : 60
             var handle = Path()
             handle.move(to: CGPoint(x: 323, y: 183))
             // Wider when it's the one meant, swinging in toward the body as it is squeezed.
@@ -374,7 +421,7 @@ struct MicButtonGlyph: View {
             }
             if solid {
                 g.fill(Path(roundedRect: CGRect(x: 323, y: 656, width: 744, height: 488),
-                            cornerRadii: .init(topLeading: 0, bottomLeading: 90, bottomTrailing: 90, topTrailing: 0)),
+                            cornerRadii: .init(topLeading: 0, bottomLeading: bodyRadius, bottomTrailing: bodyRadius, topTrailing: 0)),
                        with: .color(.white))
                 for row in 0..<3 {                                    // the speaker grille
                     for col in 0..<3 {
@@ -383,7 +430,7 @@ struct MicButtonGlyph: View {
                     }
                 }
             }
-            stroke(Path(roundedRect: CGRect(x: 323, y: 73, width: 744, height: 1071), cornerRadius: 90, style: .continuous), line)
+            stroke(Path(roundedRect: CGRect(x: 323, y: 73, width: 744, height: 1071), cornerRadius: bodyRadius, style: .continuous), line)
             var panel = Path()
             panel.move(to: CGPoint(x: 323, y: 656))
             panel.addLine(to: CGPoint(x: 1067, y: 656))
@@ -406,7 +453,7 @@ struct MicButtonGlyph: View {
                 let on = i == pressed
                 let height = on ? 250.0 : 170.0
                 let button = Path(roundedRect: CGRect(x: 1067, y: y - height / 2, width: on ? 223 : 80, height: height),
-                                  cornerRadii: .init(topLeading: 0, bottomLeading: 0, bottomTrailing: 60, topTrailing: 60))
+                                  cornerRadii: .init(topLeading: 0, bottomLeading: 0, bottomTrailing: buttonRadius, topTrailing: buttonRadius))
                 if on {
                     let color = [hex(0xEE6A3A), Color.white, hex(0xA9A9A4)][i]
                     g.fill(button, with: .color(color))
@@ -490,7 +537,7 @@ struct ClaudeIcon: View {
 /// no artwork of theirs is in this repository.
 struct ClaudeMark: View {
     var size: CGFloat
-    private static let image: NSImage? = NSWorkspace.shared.urlForApplication(withBundleIdentifier: ClaudeApp.bundleID)
+    static let image: NSImage? = NSWorkspace.shared.urlForApplication(withBundleIdentifier: ClaudeApp.bundleID)
         .flatMap { NSImage(contentsOf: $0.appendingPathComponent("Contents/Resources/TrayIconTemplate@3x.png")) }
     var body: some View {
         if let image = Self.image {
@@ -505,6 +552,8 @@ struct ClaudeMark: View {
 extension Color {
     /// The accent behind a selected piece of glass: white text reads on it in light and dark.
     static let accentGlass = Color(.sRGB, red: 0.145, green: 0.388, blue: 0.922, opacity: 1)
+    /// The green of unmuting: the round button's glass and the "Open the mic" icon.
+    static let unmuteGlass = Color(.sRGB, red: 0.08, green: 0.50, blue: 0.24, opacity: 1)
 }
 
 /// The app's two typefaces, bundled (fonts/): Inter Tight for what you read and click, JetBrains Mono for the

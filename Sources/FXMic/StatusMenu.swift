@@ -139,7 +139,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         case .done: item.button?.image = image(check: true)
         case .none: item.button?.image = image()
         }
-        item.button?.toolTip = "FXMic: \(controller.state.rawValue). Click for the panel, right-click to \(controller.state == .idle ? "unmute" : "mute")."
+        item.button?.toolTip = "\(AppName.display): \(controller.state.rawValue). Click for the panel, right-click to \(controller.state == .idle ? "unmute" : "mute")."
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
@@ -243,7 +243,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         menu.addItem(.separator())
 
         // 5. quit
-        let quitItem = NSMenuItem(title: "Quit FXMic", action: #selector(quit), keyEquivalent: "q")
+        let quitItem = NSMenuItem(title: "Quit \(AppName.display)", action: #selector(quit), keyEquivalent: "q")
         quitItem.target = self
         menu.addItem(quitItem)
     }
