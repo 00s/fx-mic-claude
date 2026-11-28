@@ -105,14 +105,12 @@ import SwiftUI
             // Claude's window.
             HStack(spacing: 0) {
                 VStack(alignment: .leading, spacing: 10) {
-                    HStack(spacing: 6) { ForEach(0..<3, id: \.self) { _ in Circle().fill(Color.black.opacity(0.15)).frame(width: 10, height: 10) } }
-                        .padding(.bottom, 14)
                     ForEach([0.8, 0.6, 0.7, 0.5, 0.65], id: \.self) { w in
                         Capsule().fill(Color.black.opacity(0.10)).frame(width: 150 * w, height: 8)
                     }
                     Spacer()
                 }
-                .padding(18).frame(width: 190).frame(maxHeight: .infinity, alignment: .top)
+                .padding(.horizontal, 18).padding(.top, 58).frame(width: 190).frame(maxHeight: .infinity, alignment: .top)
                 .background(Color(white: 0.965))
                 VStack(alignment: .leading, spacing: 14) {
                     Spacer().frame(height: 40)
@@ -138,6 +136,16 @@ import SwiftUI
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 .background(.white)
             }
+            // The window controls where macOS puts them: 12 pt across, 20 pt apart, centred 20 pt in from the corner.
+            .overlay(alignment: .topLeading) {
+                HStack(spacing: 8) {
+                    ForEach([Color(red: 1.0, green: 0.37, blue: 0.34), Color(red: 1.0, green: 0.74, blue: 0.18),
+                             Color(red: 0.16, green: 0.78, blue: 0.25)], id: \.self) { c in
+                        Circle().fill(c).frame(width: 12, height: 12)
+                    }
+                }
+                .padding(.leading, 14).padding(.top, 14)
+            }
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .shadow(color: .black.opacity(0.18), radius: 24, y: 10)
             .padding(.top, 70).padding(.horizontal, 70).padding(.bottom, 40)
@@ -149,7 +157,8 @@ import SwiftUI
 
 @MainActor func heroIsland(_ words: String) -> some View {
     let m = HUDModel(); m.shown = true; m.title = "Listening"; m.tint = .yellow; m.icon = "mic.fill"
-    m.showMeter = true; m.level = -20; m.body = words; m.footer = "Settings redesign"
+    // The same glow as the Queue and Draft pills in the states image, a little lower: yellow reads stronger.
+    m.showMeter = true; m.level = -46; m.body = words; m.footer = "Settings redesign"
     return IslandStack(model: m) { EmptyView() }
         .environment(\.onSheet, true).environment(\.colorScheme, .light)
         .foregroundStyle(Ink.of(.light).primary).font(.ui(14))
@@ -192,3 +201,4 @@ import SwiftUI
     try! NSBitmapImageRep(cgImage: img).representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: out))
     print("hero written")
 }
+
